@@ -816,7 +816,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
                     return -1;
                 }
-                if (cfg->clients == 1 ) {
+                if (cfg->clients != 1 ) {
                     fprintf(stderr, "error: --rate-limit-rps can only be used safely with 1 client per thread.\n");
                     return -1;
                 }
@@ -877,9 +877,10 @@ void usage() {
             "      --client-stats=FILE        Produce per-client stats file\n"
             "      --out-file=FILE            Name of output file (default: stdout)\n"
             "      --json-out-file=FILE       Name of JSON output file, if not set, will not print to json\n"
-            "      --hdr-file-prefix=FILE      Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
+            "      --hdr-file-prefix=FILE     Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
             "      --show-config              Print detailed configuration before running\n"
             "      --hide-histogram           Don't print detailed latency histogram\n"
+            "      --hide-quantiles           Don't print detailed quantiles on results table\n"
             "      --cluster-mode             Run client in cluster mode\n"
             "      --help                     Display this help\n"
             "      --version                  Display version information\n"
@@ -897,6 +898,11 @@ void usage() {
             "      --select-db=DB             DB number to select, when testing a redis server\n"
             "      --distinct-client-seed     Use a different random seed for each client\n"
             "      --randomize                random seed based on timestamp (default is constant value)\n"
+            "      --rate-limit-rps=NUM       Limit the request rate to the specified rate per second. By default no limit is set.\n"
+            "                                 This option requires the number of clients to be set to 1: --clients=1.\n"
+            "                                 IMPORTANT NOTE: A low request rate limit might have overhead in the time measurement\n"
+            "                                 since it enforces the calling thread to be suspended from execution multiple times a second.\n"
+            "                                 Any rate limit above 10000 rps should not affect the measurement. example: --rate-limit-rps=10000.\n"
             "\n"
             "Arbitrary command:\n"
             "      --command=COMMAND          Specify a command to send in quotes.\n"
@@ -1188,6 +1194,16 @@ int main(int argc, char *argv[])
     }
 
     config_init_defaults(&cfg);
+    // We need this here since the the defaults might change the calculations
+    // The rate of commands per second needs to be higher that the total number of connections
+    if ( ( cfg.rate_limit_rps > 0 ) && ( cfg.rate_limit_rps < cfg.clients*cfg.threads) ) {
+        benchmark_error_log("error: rate-limit-rps value (%llu) must be higher than the expected established connections (%d).\n",
+                cfg.rate_limit_rps,
+                cfg.clients*cfg.threads
+                );
+        exit(1);
+    }
+
     log_level = cfg.debug;
     if (cfg.show_config) {
         fprintf(stderr, "============== Configuration values: ==============\n");
