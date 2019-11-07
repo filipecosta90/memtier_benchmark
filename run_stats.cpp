@@ -34,6 +34,11 @@
 #endif
 
 #include "run_stats.h"
+#define LATENCY_HDR_MIN_VALUE 1
+#define LATENCY_HDR_MAX_VALUE 60000000 ## LL
+#define LATENCY_HDR_SIGDIGTS 3
+#define LATENCY_HDR_RESULTS_MULTIPLIER 1000
+#define LATENCY_HDR_GRANULARITY 10
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -90,15 +95,6 @@ void output_table::print(FILE *out, const char * header) {
 
 ///////////////////////////////////////////////////////////////////////////
 
-float get_2_meaningful_digits(float val)
-{
-    float log = floor(log10(val));
-    float factor = pow(10, log-1); // to save 2 digits
-    float new_val = round( val / factor);
-    new_val *= factor;
-    return new_val;
-}
-
 inline unsigned long int ts_diff_now(struct timeval a)
 {
     struct timeval b;
@@ -126,6 +122,21 @@ run_stats::run_stats(benchmark_config *config) :
 {
     memset(&m_start_time, 0, sizeof(m_start_time));
     memset(&m_end_time, 0, sizeof(m_end_time));
+    hdr_init(
+            LATENCY_HDR_MIN_VALUE,          // Minimum value
+            LATENCY_HDR_MAX_VALUE,          // Maximum value
+            LATENCY_HDR_SIGDIGTS,           // Number of significant figures
+            &m_get_latency_histogram);      // Pointer to initialise
+    hdr_init(
+            LATENCY_HDR_MIN_VALUE,          // Minimum value
+            LATENCY_HDR_MAX_VALUE,          // Maximum value
+            LATENCY_HDR_SIGDIGTS,           // Number of significant figures
+            &m_set_latency_histogram);      // Pointer to initialise
+    hdr_init(
+            LATENCY_HDR_MIN_VALUE,          // Minimum value
+            LATENCY_HDR_MAX_VALUE,          // Maximum value
+            LATENCY_HDR_SIGDIGTS,           // Number of significant figures
+            &m_wait_latency_histogram);     // Pointer to initialise
 
     if (config->arbitrary_commands->is_defined()) {
         setup_arbitrary_commands(config->arbitrary_commands->size());
@@ -135,7 +146,14 @@ run_stats::run_stats(benchmark_config *config) :
 void run_stats::setup_arbitrary_commands(size_t n_arbitrary_commands) {
     m_totals.setup_arbitrary_commands(n_arbitrary_commands);
     m_cur_stats.setup_arbitrary_commands(n_arbitrary_commands);
-    m_ar_commands_latency_maps.resize(n_arbitrary_commands);
+    m_ar_commands_latency_histograms.resize(n_arbitrary_commands);
+    for (unsigned int i=0; i<n_arbitrary_commands; i++) {
+        hdr_init(
+                LATENCY_HDR_MIN_VALUE,                 // Minimum value
+                LATENCY_HDR_MAX_VALUE,                 // Maximum value
+                LATENCY_HDR_SIGDIGTS,                  // Number of significant figures
+                &m_ar_commands_latency_histograms[i]); // Pointer to initialise
+    }
 }
 
 void run_stats::set_start_time(struct timeval* start_time)
@@ -175,8 +193,8 @@ void run_stats::update_get_op(struct timeval* ts, unsigned int bytes, unsigned i
 
     m_cur_stats.m_get_cmd.update_op(bytes, latency, hits, misses);
     m_totals.update_op(bytes, latency);
+    hdr_record_value(m_get_latency_histogram,latency);
 
-    m_get_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
 }
 
 void run_stats::update_set_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -185,8 +203,7 @@ void run_stats::update_set_op(struct timeval* ts, unsigned int bytes, unsigned i
 
     m_cur_stats.m_set_cmd.update_op(bytes, latency);
     m_totals.update_op(bytes, latency);
-
-    m_set_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_set_latency_histogram,latency);
 }
 
 void run_stats::update_moved_get_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -195,8 +212,7 @@ void run_stats::update_moved_get_op(struct timeval* ts, unsigned int bytes, unsi
 
     m_cur_stats.m_get_cmd.update_moved_op(bytes, latency);
     m_totals.update_op(bytes, latency);
-
-    m_get_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_get_latency_histogram,latency);
 }
 
 void run_stats::update_moved_set_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -205,8 +221,7 @@ void run_stats::update_moved_set_op(struct timeval* ts, unsigned int bytes, unsi
 
     m_cur_stats.m_set_cmd.update_moved_op(bytes, latency);
     m_totals.update_op(bytes, latency);
-
-    m_set_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_set_latency_histogram,latency);
 }
 
 void run_stats::update_ask_get_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -215,8 +230,7 @@ void run_stats::update_ask_get_op(struct timeval* ts, unsigned int bytes, unsign
 
     m_cur_stats.m_get_cmd.update_ask_op(bytes, latency);
     m_totals.update_op(bytes, latency);
-
-    m_get_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_get_latency_histogram,latency);
 }
 
 void run_stats::update_ask_set_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -225,8 +239,7 @@ void run_stats::update_ask_set_op(struct timeval* ts, unsigned int bytes, unsign
 
     m_cur_stats.m_set_cmd.update_ask_op(bytes, latency);
     m_totals.update_op(bytes, latency);
-
-    m_set_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_set_latency_histogram,latency);
 }
 
 void run_stats::update_wait_op(struct timeval *ts, unsigned int latency)
@@ -235,8 +248,7 @@ void run_stats::update_wait_op(struct timeval *ts, unsigned int latency)
 
     m_cur_stats.m_wait_cmd.update_op(0, latency);
     m_totals.update_op(0, latency);
-
-    m_wait_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+    hdr_record_value(m_wait_latency_histogram,latency);
 }
 
 void run_stats::update_arbitrary_op(struct timeval *ts, unsigned int bytes,
@@ -246,8 +258,8 @@ void run_stats::update_arbitrary_op(struct timeval *ts, unsigned int bytes,
     m_cur_stats.m_ar_commands.at(request_index).update_op(bytes, latency);
     m_totals.update_op(bytes, latency);
 
-    latency_map& map = m_ar_commands_latency_maps.at(request_index);
-    map[get_2_meaningful_digits((float)latency/1000)]++;
+    struct hdr_histogram* hist = m_ar_commands_latency_histograms.at(request_index);
+    hdr_record_value(hist,latency);
 }
 
 unsigned int run_stats::get_duration(void)
@@ -346,28 +358,33 @@ void run_stats::save_csv_set_get_commands(FILE *f, bool cluster_mode) {
     save_csv_one_sec(f, total_get_ops, total_set_ops, total_wait_ops);
 
     // save latency data
-    double total_count_float = 0;
     fprintf(f, "\n" "Full-Test GET Latency\n");
     fprintf(f, "Latency (<= msec),Percent\n");
-    for ( latency_map_itr it = m_get_latency_map.begin() ; it != m_get_latency_map.end() ; it++ ) {
-        total_count_float += it->second;
-        fprintf(f, "%8.3f,%.2f\n", it->first, total_count_float / total_get_ops * 100);
+    struct hdr_iter iter;
+    struct hdr_iter_percentiles * percentiles;
+    
+    hdr_iter_percentile_init(&iter, m_get_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double  value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        fprintf(f, "%8.3f,%.2f\n", value,percentiles->percentile);
     }
-
-    total_count_float = 0;
     fprintf(f, "\n" "Full-Test SET Latency\n");
     fprintf(f, "Latency (<= msec),Percent\n");
-    for ( latency_map_itr it = m_set_latency_map.begin(); it != m_set_latency_map.end() ; it++ ) {
-        total_count_float += it->second;
-        fprintf(f, "%8.3f,%.2f\n", it->first, total_count_float / total_set_ops * 100);
+    hdr_iter_percentile_init(&iter, m_set_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        fprintf(f, "%8.3f,%.2f\n", value,percentiles->percentile);
     }
 
-    total_count_float = 0;
     fprintf(f, "\n" "Full-Test WAIT Latency\n");
     fprintf(f, "Latency (<= msec),Percent\n");
-    for ( latency_map_itr it = m_wait_latency_map.begin(); it != m_wait_latency_map.end() ; it++ ) {
-        total_count_float += it->second;
-        fprintf(f, "%8.3f,%.2f\n", it->first, total_count_float / total_wait_ops * 100);
+    hdr_iter_percentile_init(&iter, m_wait_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        fprintf(f, "%8.3f,%.2f\n", value,percentiles->percentile);
     }
 
     // cluster mode data
@@ -403,9 +420,9 @@ void run_stats::save_csv_arbitrary_commands_one_sec(FILE *f,
             one_sec_cmd_stats& arbitrary_command_stats = stat->m_ar_commands[i];
 
             fprintf(f, "%lu,%u.%06u,%lu,",
-                    arbitrary_command_stats.m_ops,
-                    USEC_FORMAT(AVERAGE(arbitrary_command_stats.m_total_latency, arbitrary_command_stats.m_ops)),
-                    arbitrary_command_stats.m_bytes);
+                arbitrary_command_stats.m_ops,
+                USEC_FORMAT(AVERAGE(arbitrary_command_stats.m_total_latency, arbitrary_command_stats.m_ops)),
+                arbitrary_command_stats.m_bytes);
 
             total_arbitrary_commands_ops.at(i) += arbitrary_command_stats.m_ops;
         }
@@ -422,18 +439,103 @@ void run_stats::save_csv_arbitrary_commands(FILE *f, arbitrary_command_list& com
 
     // save latency data
     for (unsigned int i=0; i<command_list.size(); i++) {
-        double total_count_float = 0;
         std::string command_name = command_list[i].command_name;
 
         fprintf(f, "\n" "Full-Test %s Latency\n", command_name.c_str());
         fprintf(f, "Latency (<= msec),Percent\n");
 
-        latency_map& arbitrary_command_latency_map = m_ar_commands_latency_maps.at(i);
-        for (latency_map_itr it = arbitrary_command_latency_map.begin(); it != arbitrary_command_latency_map.end() ; it++ ) {
-            total_count_float += it->second;
-            fprintf(f, "%8.3f,%.2f\n", it->first, total_count_float / total_arbitrary_commands_ops[i] * 100);
+        struct hdr_iter iter;
+        struct hdr_iter_percentiles * percentiles;
+        
+        struct hdr_histogram* hist = m_ar_commands_latency_histograms.at(i);
+        hdr_iter_percentile_init(&iter, hist, LATENCY_HDR_GRANULARITY);
+        percentiles = &iter.specifics.percentiles;
+        while (hdr_iter_next(&iter)){
+            double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            fprintf(f, "%8.3f,%.2f\n", value,percentiles->percentile);
         }
     }
+}
+
+bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
+    if (config->hdr_prefix != NULL){
+        // Prepare output file
+        FILE *hdr_outfile;
+        char fmtbuf[1024];
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_set_command_run_%d.txt", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing GET command HDR latency histogram results to %s...\n", fmtbuf);
+        hdr_outfile = fopen(fmtbuf, "w");
+        if (!hdr_outfile){
+            perror(config->hdr_prefix);
+            return false;
+        }
+        hdr_percentiles_print(
+            m_set_latency_histogram,
+            hdr_outfile,                      // File to write to
+            LATENCY_HDR_GRANULARITY,          // Granularity of printed values
+            LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
+            CLASSIC);                         // Format CLASSIC/CSV supported.
+        fclose(hdr_outfile);
+    }
+    return true;
+}
+
+bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
+    if (config->hdr_prefix != NULL){
+        // Prepare output file
+        FILE *hdr_outfile;
+        char fmtbuf[1024];
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_get_command_run_%d.txt", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing GET command HDR latency histogram results to %s...\n", fmtbuf);
+        hdr_outfile = fopen(fmtbuf, "w");
+        if (!hdr_outfile){
+            perror(config->hdr_prefix);
+            return false;
+        }
+        hdr_percentiles_print(
+            m_get_latency_histogram,
+            hdr_outfile,                      // File to write to
+            LATENCY_HDR_GRANULARITY,          // Granularity of printed values
+            LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
+            CLASSIC);                         // Format CLASSIC/CSV supported.
+        fclose(hdr_outfile);
+    }
+    return true;
+}
+
+bool run_stats::save_hdr_arbitrary_commands(benchmark_config *config,int run_number) {
+    // save latency datacommand_list
+    arbitrary_command_list& command_list = *config->arbitrary_commands;
+    for (unsigned int i=0; i<command_list.size(); i++) {
+        std::string command_name = command_list[i].command_name;
+
+        if (config->hdr_prefix != NULL) {
+            // Prepare output file
+            FILE *hdr_outfile;
+            char fmtbuf[1024];
+            struct hdr_histogram* hist = m_ar_commands_latency_histograms.at(i);
+            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_%s_command_run_%d.txt", config->hdr_prefix, command_name.c_str(),run_number);
+            fprintf(stderr, "Writing %s command HDR latency histogram results to %s...\n", command_name.c_str(), fmtbuf);
+            hdr_outfile = fopen(fmtbuf, "w");
+            if (!hdr_outfile){
+                perror(config->hdr_prefix);
+                return false;
+            }
+            hdr_percentiles_print(
+                hist,
+                hdr_outfile,                      // File to write to
+                LATENCY_HDR_GRANULARITY,          // Granularity of printed values
+                LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
+                CLASSIC);                         // Format CLASSIC/CSV supported.
+            fclose(hdr_outfile);
+        }
+
+
+
+//        latency_map& arbitrary_command_latency_hdr = m_ar_commands_latency_hdr.at(i);
+
+    }
+    return true;
 }
 
 bool run_stats::save_csv(const char *filename, benchmark_config *config)
@@ -479,17 +581,26 @@ void run_stats::debug_dump(void)
     }
 
 
-    for( latency_map_itr it = m_get_latency_map.begin() ; it != m_get_latency_map.end() ; it++) {
-        if (it->second)
-            benchmark_debug_log("  GET <= %u msec: %u\n", it->first, it->second);
+    struct hdr_iter iter;
+    struct hdr_iter_percentiles * percentiles;
+    
+    hdr_iter_percentile_init(&iter, m_get_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        benchmark_debug_log("  GET <= %u msec: %u\n", value,percentiles->percentile);
     }
-    for(  latency_map_itr it = m_set_latency_map.begin() ; it != m_set_latency_map.end() ; it++) {
-        if (it->second)
-            benchmark_debug_log("  SET <= %u msec: %u\n", it->first, it->second);
+    hdr_iter_percentile_init(&iter, m_set_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        benchmark_debug_log("  SET <= %u msec: %u\n", value,percentiles->percentile);
     }
-    for(  latency_map_itr it = m_wait_latency_map.begin() ; it != m_wait_latency_map.end() ; it++) {
-        if (it->second)
-            benchmark_debug_log("  WAIT <= %u msec: %u\n", it->first, it->second);
+    hdr_iter_percentile_init(&iter, m_wait_latency_histogram, LATENCY_HDR_GRANULARITY);
+    percentiles = &iter.specifics.percentiles;
+    while (hdr_iter_next(&iter)){
+        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+        benchmark_debug_log("  WAIT <= %u msec: %u\n", value,percentiles->percentile);
     }
 }
 
@@ -510,24 +621,12 @@ void run_stats::aggregate_average(const std::vector<run_stats>& all_stats)
         m_totals.add(i_totals);
 
         // aggregate latency data
+        hdr_add(m_get_latency_histogram,i->m_get_latency_histogram);
+        hdr_add(m_set_latency_histogram,i->m_set_latency_histogram);
+        hdr_add(m_wait_latency_histogram,i->m_wait_latency_histogram);
 
-        for (latency_map_itr_const it = i->m_get_latency_map.begin() ; it != i->m_get_latency_map.end() ; it++) {
-            m_get_latency_map[it->first] += it->second;
-        }
-        for (latency_map_itr_const it = i->m_set_latency_map.begin() ; it != i->m_set_latency_map.end() ; it++) {
-            m_set_latency_map[it->first] += it->second;
-        }
-        for (latency_map_itr_const it = i->m_wait_latency_map.begin() ; it != i->m_wait_latency_map.end() ; it++) {
-            m_wait_latency_map[it->first] += it->second;
-        }
-
-        for (unsigned int j=0; j<i->m_ar_commands_latency_maps.size(); j++) {
-            const latency_map& other_arbitrary_command_map = i->m_ar_commands_latency_maps[j];
-
-            for (latency_map_itr_const it = other_arbitrary_command_map.begin() ; it != other_arbitrary_command_map.end() ; it++) {
-                latency_map& arbitrary_command_map = m_ar_commands_latency_maps.at(j);
-                arbitrary_command_map[it->first] += it->second;
-            }
+        for (unsigned int j=0; j < i->m_ar_commands_latency_histograms.size(); j++) {
+            hdr_add(m_ar_commands_latency_histograms.at(j),i->m_ar_commands_latency_histograms.at(j));
         }
     }
 
@@ -582,22 +681,12 @@ void run_stats::merge(const run_stats& other, int iteration)
     m_totals.m_ops += other.m_totals.m_ops;
 
     // aggregate latency data
-    for (latency_map_itr_const it = other.m_get_latency_map.begin() ; it != other.m_get_latency_map.end() ; it++) {
-        m_get_latency_map[it->first] += it->second;
-    }
-    for (latency_map_itr_const it = other.m_set_latency_map.begin() ; it != other.m_set_latency_map.end() ; it++) {
-        m_set_latency_map[it->first] += it->second;
-    }
-    for (latency_map_itr_const it = other.m_wait_latency_map.begin() ; it != other.m_wait_latency_map.end() ; it++) {
-        m_wait_latency_map[it->first] += it->second;
-    }
-    for (unsigned int i=0; i<other.m_ar_commands_latency_maps.size(); i++) {
-        const latency_map& other_arbitrary_command_map = other.m_ar_commands_latency_maps[i];
+    hdr_add(m_get_latency_histogram,other.m_get_latency_histogram);
+    hdr_add(m_set_latency_histogram,other.m_set_latency_histogram);
+    hdr_add(m_wait_latency_histogram,other.m_wait_latency_histogram);
 
-        for (latency_map_itr_const it = other_arbitrary_command_map.begin() ; it != other_arbitrary_command_map.end() ; it++) {
-            latency_map& arbitrary_command_map = m_ar_commands_latency_maps.at(i);
-            arbitrary_command_map[it->first] += it->second;
-        }
+    for (unsigned int j=0; j < other.m_ar_commands_latency_histograms.size(); j++) {
+        hdr_add(m_ar_commands_latency_histograms.at(j),other.m_ar_commands_latency_histograms.at(j));
     }
 }
 
@@ -797,23 +886,57 @@ void run_stats::print_ask_sec_column(output_table &table) {
     table.add_column(column);
 }
 
-void run_stats::print_latency_column(output_table &table) {
+void run_stats::print_avg_latency_column(output_table &table) {
     table_el el;
-    table_column column(12);
+    table_column column(15);
 
-    column.elements.push_back(*el.init_str("%12s ", "Latency"));
-    column.elements.push_back(*el.init_str("%s", "-------------"));
+    column.elements.push_back(*el.init_str("%15s ", "Avg. Latency"));
+    column.elements.push_back(*el.init_str("%s", "----------------"));
 
     if (print_arbitrary_commands_results()) {
         for (unsigned int i=0; i<m_totals.m_ar_commands.size(); i++) {
-            column.elements.push_back(*el.init_double("%12.05f ", m_totals.m_ar_commands[i].m_latency));
+            column.elements.push_back(*el.init_double("%15.05f ", m_totals.m_ar_commands[i].m_latency));
         }
     } else {
-        column.elements.push_back(*el.init_double("%12.05f ", m_totals.m_set_cmd.m_latency));
-        column.elements.push_back(*el.init_double("%12.05f ", m_totals.m_get_cmd.m_latency));
-        column.elements.push_back(*el.init_double("%12.05f ", m_totals.m_wait_cmd.m_latency));
+        column.elements.push_back(*el.init_double("%15.05f ", m_totals.m_set_cmd.m_latency));
+        column.elements.push_back(*el.init_double("%15.05f ", m_totals.m_get_cmd.m_latency));
+        column.elements.push_back(*el.init_double("%15.05f ", m_totals.m_wait_cmd.m_latency));
     }
-    column.elements.push_back(*el.init_double("%12.05f ", m_totals.m_latency));
+    column.elements.push_back(*el.init_double("%15.05f ", m_totals.m_latency));
+
+    table.add_column(column);
+}
+
+void run_stats::print_quantile_latency_column(output_table &table, double quantile, char* label) {
+    table_el el;
+    table_column column(15);
+
+    struct hdr_histogram* m_totals_latency_histogram;
+    hdr_init(
+            LATENCY_HDR_MIN_VALUE,          // Minimum value
+            LATENCY_HDR_MAX_VALUE,          // Maximum value
+            LATENCY_HDR_SIGDIGTS,           // Number of significant figures
+            &m_totals_latency_histogram);      // Pointer to initialise
+    hdr_add(m_totals_latency_histogram,m_set_latency_histogram);
+    hdr_add(m_totals_latency_histogram,m_get_latency_histogram);
+    hdr_add(m_totals_latency_histogram,m_wait_latency_histogram);
+
+    column.elements.push_back(*el.init_str("%15s ", label ));
+    column.elements.push_back(*el.init_str("%s", "----------------"));
+
+    if (print_arbitrary_commands_results()) {
+        for (unsigned int i=0; i<m_totals.m_ar_commands.size(); i++) {
+            column.elements.push_back(*el.init_double("%15.05f ", hdr_value_at_percentile(m_ar_commands_latency_histograms[i], quantile ) / (double) LATENCY_HDR_RESULTS_MULTIPLIER));
+            hdr_add(m_totals_latency_histogram,m_ar_commands_latency_histograms[i]);
+
+        }
+    } else {
+        column.elements.push_back(*el.init_double("%15.05f ", hdr_value_at_percentile(m_set_latency_histogram, quantile )/ (double) LATENCY_HDR_RESULTS_MULTIPLIER));
+        column.elements.push_back(*el.init_double("%15.05f ", hdr_value_at_percentile(m_get_latency_histogram, quantile )/ (double) LATENCY_HDR_RESULTS_MULTIPLIER));
+        column.elements.push_back(*el.init_double("%15.05f ", hdr_value_at_percentile(m_wait_latency_histogram, quantile )/ (double) LATENCY_HDR_RESULTS_MULTIPLIER));
+    }
+
+    column.elements.push_back(*el.init_double("%15.05f ", hdr_value_at_percentile(m_totals_latency_histogram, quantile )/ (double) LATENCY_HDR_RESULTS_MULTIPLIER));
 
     table.add_column(column);
 }
@@ -897,22 +1020,22 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
             "%-6s %12s %12s\n"
             "------------------------------------------------------------------------\n",
             "Type", "<= msec   ", "Percent");
-
-    unsigned long int total_count = 0;
+    struct hdr_iter iter;
+    struct hdr_iter_percentiles * percentiles;
+    
 
     if (print_arbitrary_commands_results()) {
         for (unsigned int i = 0; i < command_list.size(); i++) {
-            total_count = 0;
             std::string command_name = command_list[i].command_name;
 
             if (jsonhandler != NULL) { jsonhandler->open_nesting(command_name.c_str(), NESTED_ARRAY); }
 
-            latency_map arbitrary_command_latency_map = m_ar_commands_latency_maps.at(i);
-            for (latency_map_itr_const it = arbitrary_command_latency_map.begin();
-                 it != arbitrary_command_latency_map.end(); it++) {
-                total_count += it->second;
-                histogram_print(out, jsonhandler, command_name.c_str(), it->first,
-                                (double) total_count / m_totals.m_ar_commands.at(i).m_ops * 100);
+            struct hdr_histogram* arbitrary_command_latency_histogram = m_ar_commands_latency_histograms.at(i);
+            hdr_iter_percentile_init(&iter, arbitrary_command_latency_histogram, LATENCY_HDR_GRANULARITY);
+            percentiles = &iter.specifics.percentiles;
+            while (hdr_iter_next(&iter)){
+                double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+                histogram_print(out, jsonhandler, command_name.c_str(), value,percentiles->percentile);
             }
 
             if (jsonhandler != NULL) { jsonhandler->close_nesting(); }
@@ -922,29 +1045,36 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
         // SETs
         // ----
         if (jsonhandler != NULL){ jsonhandler->open_nesting("SET",NESTED_ARRAY);}
-        for( latency_map_itr_const it = m_set_latency_map.begin() ; it != m_set_latency_map.end() ; it++) {
-            total_count += it->second;
-            histogram_print(out, jsonhandler, "SET",it->first,(double) total_count / m_totals.m_set_cmd.m_ops * 100);
+        hdr_iter_percentile_init(&iter, m_set_latency_histogram, LATENCY_HDR_GRANULARITY);
+        percentiles = &iter.specifics.percentiles;
+        while (hdr_iter_next(&iter))
+        {
+            double  value               = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            histogram_print(out, jsonhandler, "SET", value,percentiles->percentile);
         }
         if (jsonhandler != NULL){ jsonhandler->close_nesting();}
         fprintf(out, "---\n");
         // GETs
         // ----
-        total_count = 0;
         if (jsonhandler != NULL){ jsonhandler->open_nesting("GET",NESTED_ARRAY);}
-        for( latency_map_itr_const it = m_get_latency_map.begin() ; it != m_get_latency_map.end() ; it++) {
-            total_count += it->second;
-            histogram_print(out, jsonhandler, "GET",it->first,(double) total_count / m_totals.m_get_cmd.m_ops * 100);
+        hdr_iter_percentile_init(&iter, m_get_latency_histogram, LATENCY_HDR_GRANULARITY);
+        percentiles = &iter.specifics.percentiles;
+        while (hdr_iter_next(&iter))
+        {
+            double  value               = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            histogram_print(out, jsonhandler, "GET", value,percentiles->percentile);
         }
         if (jsonhandler != NULL){ jsonhandler->close_nesting();}
         fprintf(out, "---\n");
         // WAITs
         // ----
-        total_count = 0;
         if (jsonhandler != NULL){ jsonhandler->open_nesting("WAIT",NESTED_ARRAY);}
-        for( latency_map_itr_const it = m_wait_latency_map.begin() ; it != m_wait_latency_map.end() ; it++) {
-            total_count += it->second;
-            histogram_print(out, jsonhandler, "WAIT",it->first,(double) total_count / m_totals.m_wait_cmd.m_ops * 100);
+        hdr_iter_percentile_init(&iter, m_wait_latency_histogram, LATENCY_HDR_GRANULARITY);
+        percentiles = &iter.specifics.percentiles;
+        while (hdr_iter_next(&iter))
+        {
+            double  value               = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            histogram_print(out, jsonhandler, "WAIT", value,percentiles->percentile);
         }
         if (jsonhandler != NULL){ jsonhandler->close_nesting();}
     }
@@ -985,7 +1115,18 @@ void run_stats::print(FILE *out, benchmark_config *config,
     }
 
     // Latency column
-    print_latency_column(table);
+    print_avg_latency_column(table);
+
+    if (!config->hide_quantile_cols) {
+        // Latency column
+        print_quantile_latency_column(table,50.0,(char *)"q50 Latency");
+
+        // Latency column
+        print_quantile_latency_column(table,99.0,(char *)"q99 Latency");
+
+        // Latency column
+        print_quantile_latency_column(table,99.9,(char *)"q99.9 Latency");
+    }
 
     // KB/sec column
     print_kb_sec_column(table);
@@ -1017,3 +1158,5 @@ void run_stats::print(FILE *out, benchmark_config *config,
     //      From the top (beginning of function).
     if (jsonhandler != NULL){ jsonhandler->close_nesting();}
 }
+
+

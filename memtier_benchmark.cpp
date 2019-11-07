@@ -272,6 +272,12 @@ static void config_init_defaults(struct benchmark_config *cfg)
     }
     if (!cfg->requests && !cfg->test_time)
         cfg->requests = 10000;
+    if (!cfg->hdr_prefix)
+        cfg->key_prefix = "";
+    if (!cfg->save_hdr)
+        cfg->save_hdr = 0;
+    if (!cfg->rate_limit_rps)
+        cfg->rate_limit_rps = 0;
 }
 
 static int generate_random_seed()
@@ -360,6 +366,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_key_median,
         o_show_config,
         o_hide_histogram,
+        o_hide_quantile_cols,
         o_distinct_client_seed,
         o_randomize,
         o_client_stats,
@@ -380,7 +387,9 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_tls_cert,
         o_tls_key,
         o_tls_cacert,
-        o_tls_skip_verify
+        o_tls_skip_verify,
+        o_hdr_file_prefix,
+        o_rate_limit_rps
     };
 
     static struct option long_options[] = {
@@ -396,11 +405,13 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "tls-skip-verify",            0, 0, o_tls_skip_verify },
 #endif
         { "out-file",                   1, 0, 'o' },
+        { "hdr-file-prefix",            1, 0, o_hdr_file_prefix },
         { "client-stats",               1, 0, o_client_stats },
         { "run-count",                  1, 0, 'x' },
         { "debug",                      0, 0, 'D' },
         { "show-config",                0, 0, o_show_config },
         { "hide-histogram",             0, 0, o_hide_histogram },
+        { "hide-quantiles",             0, 0, o_hide_quantile_cols },
         { "distinct-client-seed",       0, 0, o_distinct_client_seed },
         { "randomize",                  0, 0, o_randomize },
         { "requests",                   1, 0, 'n' },
@@ -441,6 +452,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "command",                    1, 0, o_command },
         { "command-key-pattern",        1, 0, o_command_key_pattern },
         { "command-ratio",              1, 0, o_command_ratio },
+        { "rate-limit-rps",             1, 0, o_rate_limit_rps },
         { NULL,                         0, 0, 0 }
     };
 
@@ -488,6 +500,10 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                 case 'o':
                     cfg->out_file = optarg;
                     break;
+                case o_hdr_file_prefix:
+                    cfg->save_hdr--;
+                    cfg->hdr_prefix = optarg;
+                    break;
                 case o_client_stats:
                     cfg->client_stats = optarg;
                     break;
@@ -507,6 +523,9 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     break;
                 case o_hide_histogram:
                     cfg->hide_histogram++;
+                    break;
+                case o_hide_quantile_cols:
+                    cfg->hide_quantile_cols++;
                     break;
                 case o_distinct_client_seed:
                     cfg->distinct_client_seed++;
@@ -790,6 +809,18 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 }
+                case o_rate_limit_rps:
+                endptr = NULL;
+                cfg->rate_limit_rps = strtoull(optarg, &endptr, 10);
+                if (cfg->rate_limit_rps < 1 || !endptr || *endptr != '\0') {
+                    fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
+                    return -1;
+                }
+                if (cfg->clients == 1 ) {
+                    fprintf(stderr, "error: --rate-limit-rps can only be used safely with 1 client per thread.\n");
+                    return -1;
+                }
+                break;
 #ifdef USE_TLS
                 case o_tls:
                     cfg->tls = true;
@@ -846,6 +877,7 @@ void usage() {
             "      --client-stats=FILE        Produce per-client stats file\n"
             "      --out-file=FILE            Name of output file (default: stdout)\n"
             "      --json-out-file=FILE       Name of JSON output file, if not set, will not print to json\n"
+            "      --hdr-file-prefix=FILE      Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
             "      --show-config              Print detailed configuration before running\n"
             "      --hide-histogram           Don't print detailed latency histogram\n"
             "      --cluster-mode             Run client in cluster mode\n"
@@ -1382,6 +1414,7 @@ int main(int argc, char *argv[])
             perror(cfg.out_file);
         }
     } else {
+        fprintf(stderr, "Writing results to stdout\n");
         outfile = stdout;
     }
 
@@ -1395,6 +1428,11 @@ int main(int argc, char *argv[])
 
             run_stats stats = run_benchmark(run_id, &cfg, obj_gen);
             all_stats.push_back(stats);
+
+            stats.save_hdr_get_command( &cfg,run_id );
+            stats.save_hdr_set_command( &cfg,run_id );
+            stats.save_hdr_arbitrary_commands( &cfg,run_id );
+
         }
         //
         // Print some run information

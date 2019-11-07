@@ -53,6 +53,7 @@ struct benchmark_config {
     int debug;
     int show_config;
     int hide_histogram;
+    int hide_quantile_cols;
     int distinct_client_seed;
     int randomize;
     int next_client_idx;
@@ -93,6 +94,9 @@ struct benchmark_config {
     const char *json_out_file;
     bool cluster_mode;
     struct arbitrary_command_list* arbitrary_commands;
+    const char *hdr_prefix;
+    int save_hdr;
+    unsigned long long rate_limit_rps;
 #ifdef USE_TLS
     bool tls;
     const char *tls_cert;

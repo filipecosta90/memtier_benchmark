@@ -60,16 +60,16 @@ void cluster_client_read_handler(bufferevent *bev, void *ctx)
 {
     shard_connection *sc = (shard_connection *) ctx;
     assert(sc != NULL);
-
     sc->process_response();
+    sc->process_subsequent_requests();
 }
 
 void cluster_client_event_handler(bufferevent *bev, short events, void *ctx)
 {
     shard_connection *sc = (shard_connection *) ctx;
-
     assert(sc != NULL);
     sc->handle_event(events);
+
 }
 
 request::request(request_type type, unsigned int size, struct timeval* sent_time, unsigned int keys)
@@ -145,6 +145,13 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
 
     m_pipeline = new std::queue<request *>;
     assert(m_pipeline != NULL);
+
+    if (config->rate_limit_rps > 0 ){
+        unsigned long long total_num_of_connections = config->clients * config->threads;
+        double connection_rate_limit = config->rate_limit_rps /(double) total_num_of_connections;
+        rate_limiter = new RateLimiter();
+        rate_limiter->set_rate(connection_rate_limit);
+    }
 }
 
 shard_connection::~shard_connection() {
@@ -200,6 +207,7 @@ void shard_connection::setup_event(int sockfd) {
     assert(m_bev != NULL);
     bufferevent_setcb(m_bev, cluster_client_read_handler,
         NULL, cluster_client_event_handler, (void *)this);
+
     m_protocol->set_buffers(bufferevent_get_input(m_bev), bufferevent_get_output(m_bev));
 }
 
@@ -327,6 +335,7 @@ request* shard_connection::pop_req() {
 }
 
 void shard_connection::push_req(request* req) {
+
     m_pipeline->push(req);
     m_pending_resp++;
 }
@@ -439,13 +448,6 @@ void shard_connection::process_response(void)
             return;
         }
     }
-
-    if (m_conns_manager->finished()) {
-        m_conns_manager->set_end_time();
-        bufferevent_disable(m_bev, EV_WRITE|EV_READ);
-    } else {
-        fill_pipeline();
-    }
 }
 
 void shard_connection::process_first_request() {
@@ -453,11 +455,24 @@ void shard_connection::process_first_request() {
     fill_pipeline();
 }
 
+void shard_connection::process_subsequent_requests() {
+    if (m_conns_manager->finished()) {
+        m_conns_manager->set_end_time();
+        bufferevent_disable(m_bev, EV_WRITE|EV_READ);
+    }
+    else {
+        fill_pipeline();
+    }
+}
+
 void shard_connection::fill_pipeline(void)
 {
+    if(rate_limiter) {
+        const int acquire_requests = m_config->pipeline - m_pipeline->size();
+        rate_limiter->acquire(acquire_requests);
+    }
     struct timeval now;
     gettimeofday(&now, NULL);
-
     while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
         if (!is_conn_setup_done()) {
             send_conn_setup_commands(now);
@@ -471,6 +486,7 @@ void shard_connection::fill_pipeline(void)
         // client manage requests logic
         m_conns_manager->create_request(now, m_id);
     }
+
 }
 
 void shard_connection::handle_event(short events)
@@ -478,6 +494,8 @@ void shard_connection::handle_event(short events)
     // connect() returning to us?  normally we expect EV_WRITE, but for UNIX domain
     // sockets we workaround since connect() returned immediately, but we don't want
     // to do any I/O from the client::connect() call...
+
+
 
     if ((get_connection_state() == conn_in_progress) && (events & BEV_EVENT_CONNECTED)) {
         m_connection_state = conn_connected;
@@ -564,7 +582,6 @@ void shard_connection::send_mget_command(struct timeval* sent_time, const keylis
                         key_list->get_keys_count(), first_key_len, first_key, last_key_len, last_key);
 
     cmd_size = m_protocol->write_command_multi_get(key_list);
-
     push_req(new request(rt_get, cmd_size, sent_time, key_list->get_keys_count()));
 }
 
@@ -576,7 +593,6 @@ void shard_connection::send_verify_get_command(struct timeval* sent_time, const 
                         key_len, key, value_len, expiry);
 
     cmd_size = m_protocol->write_command_get(key, key_len, offset);
-
     push_req(new verify_request(rt_get, cmd_size, sent_time, 1, key, key_len, value, value_len));
 }
 
