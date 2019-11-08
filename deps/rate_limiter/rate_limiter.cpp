@@ -8,40 +8,22 @@
 RateLimiter::RateLimiter() : interval_(0), max_permits_(0), stored_permits_(0), next_free_(0) {
 }
 
-long RateLimiter::acquire() {
-    return acquire(1);
-}
-
-long RateLimiter::acquire(int permits) {
-    if (permits <= 0) {
-        std::runtime_error("RateLimiter: Must request positive amount of permits");
-    }
-
-    std::chrono::microseconds wait_time = claim_next(permits);
-    std::this_thread::sleep_for(wait_time);
-
-    return wait_time.count();
-}
-
-bool RateLimiter::try_acquire(int permits) {
-    return try_acquire(permits, 0);
-}
-
-bool RateLimiter::try_acquire(int permits, int timeout) {
+bool RateLimiter::can_request(int permits) {
     using namespace std::chrono;
 
     unsigned long long now = duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
 
     // Check to see if the next free aquire time is within the
-    // specified timeout. If it's not, return false and DO NOT BLOCK,
-    // otherwise, calculate time needed to claim, and block
-    if (next_free_ > now + timeout * 1000)
+    // specified timeout of (now + interval_ * permits),
+    // with _interval being the time between events in the nominal equally * spaced events
+    // If it's not, return false
+    // otherwise, calculate time needed to claim it
+    if (next_free_ > now + interval_ * permits)
         return false;
     else {
-        acquire(permits);
+        claim_next(permits);
+        return true;
     }
-
-    return true;
 }
 
 void RateLimiter::sync(unsigned long long now) {

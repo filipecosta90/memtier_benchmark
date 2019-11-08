@@ -130,6 +130,7 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
     m_conns_manager = conns_man;
     m_config = config;
     m_event_base = event_base;
+    limited = false;
 
     if (m_config->unix_socket) {
         m_unix_sockaddr = (struct sockaddr_un *) malloc(sizeof(struct sockaddr_un));
@@ -376,7 +377,6 @@ void shard_connection::process_response(void)
 {
     int ret;
     bool responses_handled = false;
-
     struct timeval now;
     gettimeofday(&now, NULL);
 
@@ -385,8 +385,9 @@ void shard_connection::process_response(void)
         protocol_response *r = m_protocol->get_response();
 
         request* req = pop_req();
-
-        if (req->m_type == rt_auth) {
+        if (req->m_type == rt_empty_rate_limit) {
+                benchmark_debug_log("rate limiting fake response.\n");
+        } else if (req->m_type == rt_auth) {
             if (r->is_error()) {
                 benchmark_error_log("error: authentication failed [%s]\n", r->get_status());
                 error = true;
@@ -456,8 +457,9 @@ void shard_connection::process_first_request() {
 }
 
 void shard_connection::process_subsequent_requests() {
-    if (m_conns_manager->finished()) {
+    if (m_conns_manager->finished()){
         m_conns_manager->set_end_time();
+        benchmark_debug_log("server %s: Connection disabling buffer event\n", get_readable_id());
         bufferevent_disable(m_bev, EV_WRITE|EV_READ);
     }
     else {
@@ -467,26 +469,28 @@ void shard_connection::process_subsequent_requests() {
 
 void shard_connection::fill_pipeline(void)
 {
-    if(rate_limiter) {
-        const int acquire_requests = m_config->pipeline - m_pipeline->size();
-        rate_limiter->acquire(acquire_requests);
+    if ( rate_limiter != NULL ){
+        long long quantity = m_config->pipeline - m_pipeline->size();
+        limited = !rate_limiter->can_request(quantity);
     }
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
-        if (!is_conn_setup_done()) {
-            send_conn_setup_commands(now);
-            return;
+
+    if(limited==false){
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
+            if (!is_conn_setup_done()) {
+                send_conn_setup_commands(now);
+                return;
+            }
+            // don't exceed requests
+            if (m_conns_manager->hold_pipeline(m_id))
+                break;
+            // client manage requests logic
+            m_conns_manager->create_request(now, m_id);
         }
-
-        // don't exceed requests
-        if (m_conns_manager->hold_pipeline(m_id))
-            break;
-
-        // client manage requests logic
-        m_conns_manager->create_request(now, m_id);
+    }else{
+        send_empty_rate_limit_event();
     }
-
 }
 
 void shard_connection::handle_event(short events)
@@ -558,6 +562,12 @@ void shard_connection::send_set_command(struct timeval* sent_time, const char *k
                                              expiry, offset);
 
     push_req(new request(rt_set, cmd_size, sent_time, 1));
+}
+
+void shard_connection::send_empty_rate_limit_event() {
+    if ( bufferevent_write(m_bev,"^\r\n",3) == 0 ){
+        push_req(new request(rt_empty_rate_limit, 3, 0, 0));
+    }
 }
 
 void shard_connection::send_get_command(struct timeval* sent_time,

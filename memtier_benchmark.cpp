@@ -816,10 +816,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
                     return -1;
                 }
-                if (cfg->clients != 1 ) {
-                    fprintf(stderr, "error: --rate-limit-rps can only be used safely with 1 client per thread.\n");
-                    return -1;
-                }
                 break;
 #ifdef USE_TLS
                 case o_tls:
@@ -899,10 +895,7 @@ void usage() {
             "      --distinct-client-seed     Use a different random seed for each client\n"
             "      --randomize                random seed based on timestamp (default is constant value)\n"
             "      --rate-limit-rps=NUM       Limit the request rate to the specified rate per second. By default no limit is set.\n"
-            "                                 This option requires the number of clients to be set to 1: --clients=1.\n"
-            "                                 IMPORTANT NOTE: A low request rate limit might have overhead in the time measurement\n"
-            "                                 since it enforces the calling thread to be suspended from execution multiple times a second.\n"
-            "                                 Any rate limit above 10000 rps should not affect the measurement. example: --rate-limit-rps=10000.\n"
+            "                                 For example: --rate-limit-rps=10000.\n"
             "\n"
             "Arbitrary command:\n"
             "      --command=COMMAND          Specify a command to send in quotes.\n"
