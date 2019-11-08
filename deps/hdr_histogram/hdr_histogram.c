@@ -495,6 +495,10 @@ int64_t hdr_value_at_percentile(const struct hdr_histogram *h, double percentile
     return 0;
 }
 
+int64_t hdr_total_count(const struct hdr_histogram *h){
+    return h != NULL ? h->total_count : 0;
+}
+
 double hdr_mean(const struct hdr_histogram *h) {
     struct hdr_iter iter;
     int64_t total = 0;

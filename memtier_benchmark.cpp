@@ -278,6 +278,8 @@ static void config_init_defaults(struct benchmark_config *cfg)
         cfg->save_hdr = 0;
     if (!cfg->rate_limit_rps)
         cfg->rate_limit_rps = 0;
+    if (!cfg->print_quantiles.is_defined())
+        cfg->print_quantiles = config_quantiles("50,99,99.9");
 }
 
 static int generate_random_seed()
@@ -366,7 +368,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_key_median,
         o_show_config,
         o_hide_histogram,
-        o_hide_quantile_cols,
+        o_print_quantiles,
         o_distinct_client_seed,
         o_randomize,
         o_client_stats,
@@ -411,7 +413,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "debug",                      0, 0, 'D' },
         { "show-config",                0, 0, o_show_config },
         { "hide-histogram",             0, 0, o_hide_histogram },
-        { "hide-quantiles",             0, 0, o_hide_quantile_cols },
+        { "print-quantiles",            1, 0, o_print_quantiles },
         { "distinct-client-seed",       0, 0, o_distinct_client_seed },
         { "randomize",                  0, 0, o_randomize },
         { "requests",                   1, 0, 'n' },
@@ -524,8 +526,12 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                 case o_hide_histogram:
                     cfg->hide_histogram++;
                     break;
-                case o_hide_quantile_cols:
-                    cfg->hide_quantile_cols++;
+                case o_print_quantiles:
+                    cfg->print_quantiles = config_quantiles(optarg);
+                    if (!cfg->print_quantiles.is_defined()) {
+                        fprintf(stderr, "error: quantiles must be expressed as [0.0-100.0],[0.0-100.0](,...) .\n");
+                        return -1;
+                    }
                     break;
                 case o_distinct_client_seed:
                     cfg->distinct_client_seed++;
@@ -876,7 +882,7 @@ void usage() {
             "      --hdr-file-prefix=FILE     Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
             "      --show-config              Print detailed configuration before running\n"
             "      --hide-histogram           Don't print detailed latency histogram\n"
-            "      --hide-quantiles           Don't print detailed quantiles on results table\n"
+            "      --print-quantiles          Specify which quantile info to print on the results table (by default prints quantiles: 50,99,99.9)\n"
             "      --cluster-mode             Run client in cluster mode\n"
             "      --help                     Display this help\n"
             "      --version                  Display version information\n"
@@ -1437,7 +1443,7 @@ int main(int argc, char *argv[])
 
             run_stats stats = run_benchmark(run_id, &cfg, obj_gen);
             all_stats.push_back(stats);
-
+            stats.save_hdr_full_run( &cfg,run_id );
             stats.save_hdr_get_command( &cfg,run_id );
             stats.save_hdr_set_command( &cfg,run_id );
             stats.save_hdr_arbitrary_commands( &cfg,run_id );

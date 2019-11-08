@@ -1094,6 +1094,7 @@ int memcache_binary_protocol::write_arbitrary_command(const char *val, int val_l
     assert(0);
 }
 
+
 /////////////////////////////////////////////////////////////////////////
 
 class abstract_protocol *protocol_factory(const char *proto_name)

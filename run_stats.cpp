@@ -457,13 +457,52 @@ void run_stats::save_csv_arbitrary_commands(FILE *f, arbitrary_command_list& com
     }
 }
 
-bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
+bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
     if (config->hdr_prefix != NULL){
+
+        struct hdr_histogram* m_totals_latency_histogram;
+        hdr_init(
+                LATENCY_HDR_MIN_VALUE,          // Minimum value
+                LATENCY_HDR_MAX_VALUE,          // Maximum value
+                LATENCY_HDR_SIGDIGTS,           // Number of significant figures
+                &m_totals_latency_histogram);      // Pointer to initialise
+        hdr_add(m_totals_latency_histogram,m_set_latency_histogram);
+        hdr_add(m_totals_latency_histogram,m_get_latency_histogram);
+        hdr_add(m_totals_latency_histogram,m_wait_latency_histogram);
+
+        for (unsigned int i=0; i<m_totals.m_ar_commands.size(); i++) {
+            hdr_add(m_totals_latency_histogram,m_ar_commands_latency_histograms[i]);
+        }
+        if(hdr_total_count( m_totals_latency_histogram )>0){
+            // Prepare output file
+            FILE *hdr_outfile;
+            char fmtbuf[1024];
+            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.txt", config->hdr_prefix, run_number);
+            fprintf(stderr, "Writing Full Run command HDR latency histogram results to %s...\n", fmtbuf);
+            hdr_outfile = fopen(fmtbuf, "w");
+            if (!hdr_outfile){
+                perror(config->hdr_prefix);
+                return false;
+            }
+            hdr_percentiles_print(
+                    m_totals_latency_histogram,
+                    hdr_outfile,                      // File to write to
+                    LATENCY_HDR_GRANULARITY,          // Granularity of printed values
+                    LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
+                    CLASSIC);                         // Format CLASSIC/CSV supported.
+            fclose(hdr_outfile);
+        }
+    }
+    return true;
+}
+
+bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
+    if (config->hdr_prefix != NULL && (hdr_total_count( m_set_latency_histogram )>0) ){
         // Prepare output file
         FILE *hdr_outfile;
         char fmtbuf[1024];
-        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_set_command_run_%d.txt", config->hdr_prefix, run_number);
-        fprintf(stderr, "Writing GET command HDR latency histogram results to %s...\n", fmtbuf);
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_SET_command_run_%d.txt", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing SET command HDR latency histogram results to %s...\n", fmtbuf);
         hdr_outfile = fopen(fmtbuf, "w");
         if (!hdr_outfile){
             perror(config->hdr_prefix);
@@ -481,11 +520,11 @@ bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
 }
 
 bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
-    if (config->hdr_prefix != NULL){
+    if (config->hdr_prefix != NULL && (hdr_total_count( m_get_latency_histogram )>0) ){
         // Prepare output file
         FILE *hdr_outfile;
         char fmtbuf[1024];
-        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_get_command_run_%d.txt", config->hdr_prefix, run_number);
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_GET_command_run_%d.txt", config->hdr_prefix, run_number);
         fprintf(stderr, "Writing GET command HDR latency histogram results to %s...\n", fmtbuf);
         hdr_outfile = fopen(fmtbuf, "w");
         if (!hdr_outfile){
@@ -1049,7 +1088,7 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
         percentiles = &iter.specifics.percentiles;
         while (hdr_iter_next(&iter))
         {
-            double  value               = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            double  value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
             histogram_print(out, jsonhandler, "SET", value,percentiles->percentile);
         }
         if (jsonhandler != NULL){ jsonhandler->close_nesting();}
@@ -1061,7 +1100,7 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
         percentiles = &iter.specifics.percentiles;
         while (hdr_iter_next(&iter))
         {
-            double  value               = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
+            double  value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
             histogram_print(out, jsonhandler, "GET", value,percentiles->percentile);
         }
         if (jsonhandler != NULL){ jsonhandler->close_nesting();}
@@ -1117,15 +1156,19 @@ void run_stats::print(FILE *out, benchmark_config *config,
     // Latency column
     print_avg_latency_column(table);
 
-    if (!config->hide_quantile_cols) {
-        // Latency column
-        print_quantile_latency_column(table,50.0,(char *)"q50 Latency");
-
-        // Latency column
-        print_quantile_latency_column(table,99.0,(char *)"q99 Latency");
-
-        // Latency column
-        print_quantile_latency_column(table,99.9,(char *)"q99.9 Latency");
+    for (std::size_t i = 0; i < config->print_quantiles.quantile_list.size(); i++){
+        float quantile = config->print_quantiles.quantile_list[i];
+        char average_header[50];
+        int ndigts = 0;
+        float num = abs(quantile);
+        num = num - int(num);
+        while (abs(num)>0.001 && ndigts < 3 ) {
+            num = num * 10;
+            ndigts++;
+            num = num - int(num);
+        }
+        sprintf(average_header,"q%.*f Latency", ndigts, quantile);
+        print_quantile_latency_column(table,quantile,(char *)average_header);
     }
 
     // KB/sec column

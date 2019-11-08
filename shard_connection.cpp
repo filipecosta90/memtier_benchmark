@@ -185,6 +185,11 @@ shard_connection::~shard_connection() {
         delete m_pipeline;
         m_pipeline = NULL;
     }
+
+    if (rate_limiter != NULL) {
+        delete rate_limiter;
+        rate_limiter = NULL;
+    }
 }
 
 void shard_connection::setup_event(int sockfd) {

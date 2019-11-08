@@ -7,6 +7,8 @@
 class RateLimiter : public RateLimiterInterface {
 public:
     RateLimiter();
+    virtual ~RateLimiter() {}
+
 
     bool can_request(int permits);
 

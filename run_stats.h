@@ -137,6 +137,7 @@ public:
                                              arbitrary_command_list& command_list,
                                              std::vector<unsigned long int>& total_arbitrary_commands_ops);
     void save_csv_arbitrary_commands(FILE *f, arbitrary_command_list& command_list);
+    bool save_hdr_full_run(benchmark_config *config,int run_number);
     bool save_hdr_set_command(benchmark_config *config,int run_number);
     bool save_hdr_get_command(benchmark_config *config,int run_number);
     bool save_hdr_arbitrary_commands(benchmark_config *config,int run_number);
