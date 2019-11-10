@@ -34,11 +34,6 @@
 #endif
 
 #include "run_stats.h"
-#define LATENCY_HDR_MIN_VALUE 1
-#define LATENCY_HDR_MAX_VALUE 60000000 ## LL
-#define LATENCY_HDR_SIGDIGTS 3
-#define LATENCY_HDR_RESULTS_MULTIPLIER 1000
-#define LATENCY_HDR_GRANULARITY 10
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -490,6 +485,23 @@ bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
                     LATENCY_HDR_GRANULARITY,          // Granularity of printed values
                     LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
                     CLASSIC);                         // Format CLASSIC/CSV supported.
+            fflush(hdr_outfile);
+            fclose(hdr_outfile);
+
+            struct timespec start_timespec;
+            struct timespec end_timespec;
+            TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
+            TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
+            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.hgrm", config->hdr_prefix, run_number);
+            fprintf(stderr, "Writing Full Run command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
+            hdr_outfile = fopen(fmtbuf, "w");
+            if (!hdr_outfile){
+                perror(config->hdr_prefix);
+                return false;
+            }
+            hdr_log_write_header(hdr_outfile, "Full Run command HDR latency histogram results", &start_timespec);
+            hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_totals_latency_histogram);
+            fflush(hdr_outfile);
             fclose(hdr_outfile);
         }
     }
@@ -514,6 +526,23 @@ bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
             LATENCY_HDR_GRANULARITY,          // Granularity of printed values
             LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
             CLASSIC);                         // Format CLASSIC/CSV supported.
+        fflush(hdr_outfile);
+        fclose(hdr_outfile);
+
+        struct timespec start_timespec;
+        struct timespec end_timespec;
+        TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
+        TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_SET_command_run_%d.hgrm", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing SET command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
+        hdr_outfile = fopen(fmtbuf, "w");
+        if (!hdr_outfile){
+            perror(config->hdr_prefix);
+            return false;
+        }
+        hdr_log_write_header(hdr_outfile, "SET command HDR latency histogram results", &start_timespec);
+        hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_set_latency_histogram);
+        fflush(hdr_outfile);
         fclose(hdr_outfile);
     }
     return true;
@@ -537,6 +566,23 @@ bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
             LATENCY_HDR_GRANULARITY,          // Granularity of printed values
             LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
             CLASSIC);                         // Format CLASSIC/CSV supported.
+        fflush(hdr_outfile);
+        fclose(hdr_outfile);
+
+        struct timespec start_timespec;
+        struct timespec end_timespec;
+        TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
+        TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_GET_command_run_%d.hgrm", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing GET command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
+        hdr_outfile = fopen(fmtbuf, "w");
+        if (!hdr_outfile){
+            perror(config->hdr_prefix);
+            return false;
+        }
+        hdr_log_write_header(hdr_outfile, "GET command HDR latency histogram results", &start_timespec);
+        hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_get_latency_histogram);
+        fflush(hdr_outfile);
         fclose(hdr_outfile);
     }
     return true;
@@ -566,13 +612,27 @@ bool run_stats::save_hdr_arbitrary_commands(benchmark_config *config,int run_num
                 LATENCY_HDR_GRANULARITY,          // Granularity of printed values
                 LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
                 CLASSIC);                         // Format CLASSIC/CSV supported.
+            fflush(hdr_outfile);
+            fclose(hdr_outfile);
+
+            struct timespec start_timespec;
+            struct timespec end_timespec;
+            TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
+            TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
+            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_%s_command_run_%d.hgrm", config->hdr_prefix, command_name.c_str(), run_number);
+            fprintf(stderr, "Writing %s command HDR latency histogram results in HistogramLogProcessor format to %s...\n", command_name.c_str(), fmtbuf);
+            hdr_outfile = fopen(fmtbuf, "w");
+            if (!hdr_outfile){
+                perror(config->hdr_prefix);
+                return false;
+            }
+            char header[1024];
+            snprintf(header, sizeof(header) - 1, "%s command HDR latency histogram results", command_name.c_str());
+            hdr_log_write_header(hdr_outfile, header, &start_timespec);
+            hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, hist);
+            fflush(hdr_outfile);
             fclose(hdr_outfile);
         }
-
-
-
-//        latency_map& arbitrary_command_latency_hdr = m_ar_commands_latency_hdr.at(i);
-
     }
     return true;
 }

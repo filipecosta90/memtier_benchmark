@@ -41,6 +41,7 @@ memtier_benchmark_SOURCES = \
 	item.cpp item.h \
 	file_io.cpp file_io.h \
 	config_types.cpp config_types.h \
+	deps/hdr_histogram/hdr_histogram_log.c deps/hdr_histogram/hdr_histogram_log.h deps/hdr_histogram/byteorder.h \
 	deps/hdr_histogram/hdr_histogram.c deps/hdr_histogram/hdr_histogram.h \
 	deps/rate_limiter/rate_limiter.cpp deps/rate_limiter/rate_limiter.h deps/rate_limiter/rate_limiter_interface.h
 memtier_benchmark_LDADD = \

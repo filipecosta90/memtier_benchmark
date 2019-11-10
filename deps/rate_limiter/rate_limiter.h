@@ -7,6 +7,7 @@
 class RateLimiter : public RateLimiterInterface {
 public:
     RateLimiter();
+
     virtual ~RateLimiter() {}
 
 
