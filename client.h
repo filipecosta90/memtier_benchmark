@@ -37,7 +37,6 @@
 #include "obj_gen.h"
 #include "memtier_benchmark.h"
 #include "run_stats.h"
-//#include "deps/rate_limiter/rate_limiter.h"
 
 #define MAIN_CONNECTION m_connections[0]
 
@@ -73,8 +72,6 @@ protected:
     unsigned long long m_tot_wait_ops;            // Total number of WAIT ops
 
     keylist *m_keylist;                           // used to construct multi commands
-    RateLimiterInterface *rate_limiter;           // used to rate limit
-
 
 public:
     client(client_group* group);

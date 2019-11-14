@@ -151,7 +151,7 @@ Sample Visual Feel of the full latency spectrum using an [online formatter](http
 [sample_visual_histogram]: ./docs/sample_visual_histogram.png "Configure RedisInsight"
 
 
-#### Sustainable Throughput
-To really understand a system behavior we also cant really solely on doing the full percentile analysis while stressing the system to it's maximum RPS. We need to be able to compare the behavior under different throughput's and/or configurations, to be able to get the best "Sustainable Throughput: The throughput achieved while safely maintaining service levels.
-By default no limit is specified and memtier will try to stress redis up to its most. 
+### Sustainable Throughput
+To really understand a system behavior we also cant really solely on doing the full percentile analysis while stressing the system to it's maximum RPS. We need to be able to compare the behavior under different throughput's and/or configurations, to be able to get the best "Sustainable Throughput" - The throughput achieved while safely maintaining service levels.
+By default no limit is specified and memtier_benchmark will try to stress redis up to its most. 
 To enable limiting the rate of commands per second, you should use the --rate-limit-rps option followed by the rate value.

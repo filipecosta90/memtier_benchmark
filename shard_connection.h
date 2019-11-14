@@ -29,7 +29,7 @@
 #include <event2/bufferevent.h>
 
 #include "protocol.h"
-#include "deps/rate_limiter/rate_limiter.h"
+#include "rate_limiter.h"
 
 // forward decleration
 class connections_manager;
@@ -187,7 +187,7 @@ private:
     enum select_db_state m_db_selection;
     enum cluster_slots_state m_cluster_slots;
 
-    RateLimiterInterface *rate_limiter;           // used to rate limit
+    RateLimiter *rate_limiter;           // used to rate limit
 };
 
 #endif //MEMTIER_BENCHMARK_SHARD_CONNECTION_H

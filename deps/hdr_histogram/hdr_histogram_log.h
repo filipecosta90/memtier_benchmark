@@ -1,22 +1,31 @@
 /**
  * hdr_histogram_log.h
- * Written by Michael Barker and released to the public domain,
- * as explained at http://creativecommons.org/publicdomain/zero/1.0/
+ * Copyright (c) 2012, 2013, 2014 Gil Tene
+ * Copyright (c) 2014 Michael Barker
+ * Copyright (c) 2014 Matt Warren
+ * All rights reserved.
  *
- * This code follows the Plan 9 approach to header declaration.  In order
- * to maintain fast builds does not define it's dependent headers.
- * They should be included manually by the user.  This code requires:
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * - #include <stdint.h>
- * - #include <stdbool.h>
- * - #include <stdio.h>
- * - #include <time.h>
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
  *
- * The source for the hdr_histogram utilises a few C99 constructs, specifically
- * the use of stdint/stdbool and inline variable declaration.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * The implementation makes use of zlib to provide compression.  You will need
- * to link against -lz in order to link applications that include this header.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/time.h>

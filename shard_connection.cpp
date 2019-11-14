@@ -151,7 +151,7 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
         unsigned long long total_num_of_connections = config->clients * config->threads;
         double connection_rate_limit = config->rate_limit_rps /(double) total_num_of_connections;
         rate_limiter = new RateLimiter();
-        rate_limiter->set_rate(connection_rate_limit);
+        rate_limiter->set_rate(1,connection_rate_limit);
     }
 }
 
@@ -474,14 +474,15 @@ void shard_connection::process_subsequent_requests() {
 
 void shard_connection::fill_pipeline(void)
 {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
     if ( rate_limiter != NULL ){
         long long quantity = m_config->pipeline - m_pipeline->size();
-        limited = !rate_limiter->can_request(quantity);
+        limited = !rate_limiter->can_request(quantity,now);
     }
 
     if(limited==false){
-        struct timeval now;
-        gettimeofday(&now, NULL);
         while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
             if (!is_conn_setup_done()) {
                 send_conn_setup_commands(now);
