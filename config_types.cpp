@@ -181,7 +181,6 @@ bool config_weight_list::is_defined(void)
     return false;
 }
 
-
 unsigned int config_weight_list::largest(void)
 {
     unsigned int largest = 0;

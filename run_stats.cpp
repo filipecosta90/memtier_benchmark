@@ -485,7 +485,6 @@ bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
                     LATENCY_HDR_GRANULARITY,          // Granularity of printed values
                     LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
                     CLASSIC);                         // Format CLASSIC/CSV supported.
-            fflush(hdr_outfile);
             fclose(hdr_outfile);
 
             struct timespec start_timespec;
@@ -501,7 +500,6 @@ bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
             }
             hdr_log_write_header(hdr_outfile, "Full Run command HDR latency histogram results", &start_timespec);
             hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_totals_latency_histogram);
-            fflush(hdr_outfile);
             fclose(hdr_outfile);
         }
     }
@@ -526,7 +524,6 @@ bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
             LATENCY_HDR_GRANULARITY,          // Granularity of printed values
             LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
             CLASSIC);                         // Format CLASSIC/CSV supported.
-        fflush(hdr_outfile);
         fclose(hdr_outfile);
 
         struct timespec start_timespec;
@@ -542,7 +539,6 @@ bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
         }
         hdr_log_write_header(hdr_outfile, "SET command HDR latency histogram results", &start_timespec);
         hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_set_latency_histogram);
-        fflush(hdr_outfile);
         fclose(hdr_outfile);
     }
     return true;
@@ -566,7 +562,6 @@ bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
             LATENCY_HDR_GRANULARITY,          // Granularity of printed values
             LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
             CLASSIC);                         // Format CLASSIC/CSV supported.
-        fflush(hdr_outfile);
         fclose(hdr_outfile);
 
         struct timespec start_timespec;
@@ -582,7 +577,6 @@ bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
         }
         hdr_log_write_header(hdr_outfile, "GET command HDR latency histogram results", &start_timespec);
         hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_get_latency_histogram);
-        fflush(hdr_outfile);
         fclose(hdr_outfile);
     }
     return true;
@@ -612,7 +606,6 @@ bool run_stats::save_hdr_arbitrary_commands(benchmark_config *config,int run_num
                 LATENCY_HDR_GRANULARITY,          // Granularity of printed values
                 LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
                 CLASSIC);                         // Format CLASSIC/CSV supported.
-            fflush(hdr_outfile);
             fclose(hdr_outfile);
 
             struct timespec start_timespec;
@@ -630,7 +623,6 @@ bool run_stats::save_hdr_arbitrary_commands(benchmark_config *config,int run_num
             snprintf(header, sizeof(header) - 1, "%s command HDR latency histogram results", command_name.c_str());
             hdr_log_write_header(hdr_outfile, header, &start_timespec);
             hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, hist);
-            fflush(hdr_outfile);
             fclose(hdr_outfile);
         }
     }
@@ -677,29 +669,6 @@ void run_stats::debug_dump(void)
                             i->m_get_cmd.m_bytes,
                             i->m_get_cmd.m_hits,
                             i->m_get_cmd.m_misses);
-    }
-
-
-    struct hdr_iter iter;
-    struct hdr_iter_percentiles * percentiles;
-    
-    hdr_iter_percentile_init(&iter, m_get_latency_histogram, LATENCY_HDR_GRANULARITY);
-    percentiles = &iter.specifics.percentiles;
-    while (hdr_iter_next(&iter)){
-        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
-        benchmark_debug_log("  GET <= %u msec: %u\n", value,percentiles->percentile);
-    }
-    hdr_iter_percentile_init(&iter, m_set_latency_histogram, LATENCY_HDR_GRANULARITY);
-    percentiles = &iter.specifics.percentiles;
-    while (hdr_iter_next(&iter)){
-        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
-        benchmark_debug_log("  SET <= %u msec: %u\n", value,percentiles->percentile);
-    }
-    hdr_iter_percentile_init(&iter, m_wait_latency_histogram, LATENCY_HDR_GRANULARITY);
-    percentiles = &iter.specifics.percentiles;
-    while (hdr_iter_next(&iter)){
-        double value = iter.highest_equivalent_value / (double) LATENCY_HDR_RESULTS_MULTIPLIER;
-        benchmark_debug_log("  WAIT <= %u msec: %u\n", value,percentiles->percentile);
     }
 }
 
@@ -1227,7 +1196,7 @@ void run_stats::print(FILE *out, benchmark_config *config,
             ndigts++;
             num = num - int(num);
         }
-        sprintf(average_header,"q%.*f Latency", ndigts, quantile);
+        snprintf(average_header,sizeof(average_header)-1,"q%.*f Latency", ndigts, quantile);
         print_quantile_latency_column(table,quantile,(char *)average_header);
     }
 

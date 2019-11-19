@@ -187,7 +187,6 @@ public:
     unsigned long int get_duration_usec(void);
 
     void merge_run_stats(run_stats* target);
-
 };
 
 

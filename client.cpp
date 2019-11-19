@@ -91,6 +91,7 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
 
     m_keylist = new keylist(m_config->multi_key_get + 1);
     assert(m_keylist != NULL);
+
     return true;
 }
 
@@ -207,6 +208,7 @@ bool client::finished(void)
 
 void client::set_start_time() {
     struct timeval now;
+
     gettimeofday(&now, NULL);
     m_stats.set_start_time(&now);
 }

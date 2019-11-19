@@ -67,9 +67,9 @@ void cluster_client_read_handler(bufferevent *bev, void *ctx)
 void cluster_client_event_handler(bufferevent *bev, short events, void *ctx)
 {
     shard_connection *sc = (shard_connection *) ctx;
+
     assert(sc != NULL);
     sc->handle_event(events);
-
 }
 
 request::request(request_type type, unsigned int size, struct timeval* sent_time, unsigned int keys)
@@ -213,7 +213,6 @@ void shard_connection::setup_event(int sockfd) {
     assert(m_bev != NULL);
     bufferevent_setcb(m_bev, cluster_client_read_handler,
         NULL, cluster_client_event_handler, (void *)this);
-
     m_protocol->set_buffers(bufferevent_get_input(m_bev), bufferevent_get_output(m_bev));
 }
 
@@ -341,7 +340,6 @@ request* shard_connection::pop_req() {
 }
 
 void shard_connection::push_req(request* req) {
-
     m_pipeline->push(req);
     m_pending_resp++;
 }
@@ -390,46 +388,52 @@ void shard_connection::process_response(void)
         protocol_response *r = m_protocol->get_response();
 
         request* req = pop_req();
-        if (req->m_type == rt_empty_rate_limit) {
-                benchmark_debug_log("rate limiting fake response.\n");
-        } else if (req->m_type == rt_auth) {
-            if (r->is_error()) {
-                benchmark_error_log("error: authentication failed [%s]\n", r->get_status());
-                error = true;
-            } else {
-                m_authentication = auth_done;
-                benchmark_debug_log("authentication successful.\n");
-            }
-        } else if (req->m_type == rt_select_db) {
-            if (strcmp(r->get_status(), "+OK") != 0) {
-                benchmark_error_log("database selection failed.\n");
-                error = true;
-            } else {
-                benchmark_debug_log("database selection successful.\n");
-                m_db_selection = select_done;
-            }
-        } else if (req->m_type == rt_cluster_slots) {
-            if (r->get_mbulk_value() == NULL || r->get_mbulk_value()->mbulks_elements.size() == 0) {
-                benchmark_error_log("cluster slot failed.\n");
-                error = true;
-            } else {
-                // parse response
-                m_conns_manager->handle_cluster_slots(r);
-                m_protocol->set_keep_value(false);
+        if (req->m_type != rt_empty_rate_limit) {
+            switch (req->m_type){
+                case rt_auth: {
+                    if (r->is_error()) {
+                        benchmark_error_log("error: authentication failed [%s]\n", r->get_status());
+                        error = true;
+                    } else {
+                        m_authentication = auth_done;
+                        benchmark_debug_log("authentication successful.\n");
+                    }
+                    break;
+                }
+                case rt_select_db: {
+                    if (strcmp(r->get_status(), "+OK") != 0) {
+                        benchmark_error_log("database selection failed.\n");
+                        error = true;
+                    } else {
+                        benchmark_debug_log("database selection successful.\n");
+                        m_db_selection = select_done;
+                    }
+                }
+                case rt_cluster_slots: {
+                    if (r->get_mbulk_value() == NULL || r->get_mbulk_value()->mbulks_elements.size() == 0) {
+                        benchmark_error_log("cluster slot failed.\n");
+                        error = true;
+                    } else {
+                        // parse response
+                        m_conns_manager->handle_cluster_slots(r);
+                        m_protocol->set_keep_value(false);
 
-                m_cluster_slots = slots_done;
-                benchmark_debug_log("cluster slot command successful\n");
-            }
-        } else {
-            benchmark_debug_log("server %s: handled response (first line): %s, %d hits, %d misses\n",
-                                get_readable_id(),
-                                r->get_status(),
-                                r->get_hits(),
-                                req->m_keys - r->get_hits());
+                        m_cluster_slots = slots_done;
+                        benchmark_debug_log("cluster slot command successful\n");
+                    }
+                }
+                default: {
+                    benchmark_debug_log("server %s: handled response (first line): %s, %d hits, %d misses\n",
+                                        get_readable_id(),
+                                        r->get_status(),
+                                        r->get_hits(),
+                                        req->m_keys - r->get_hits());
 
-            m_conns_manager->handle_response(m_id, now, req, r);
-            m_conns_manager->inc_reqs_processed();
-            responses_handled = true;
+                    m_conns_manager->handle_response(m_id, now, req, r);
+                    m_conns_manager->inc_reqs_processed();
+                    responses_handled = true;
+                }
+            }
         }
         delete req;
         if (error) {
@@ -505,8 +509,6 @@ void shard_connection::handle_event(short events)
     // sockets we workaround since connect() returned immediately, but we don't want
     // to do any I/O from the client::connect() call...
 
-
-
     if ((get_connection_state() == conn_in_progress) && (events & BEV_EVENT_CONNECTED)) {
         m_connection_state = conn_connected;
         bufferevent_enable(m_bev, EV_READ|EV_WRITE);
@@ -570,6 +572,17 @@ void shard_connection::send_set_command(struct timeval* sent_time, const char *k
     push_req(new request(rt_set, cmd_size, sent_time, 1));
 }
 
+
+/*
+ * empty rate limit command:
+ *
+ * we send the empty rate limit command so that when a client has exceed is quota
+ * instead of writing new requests, it will just submit empty event to the event loop.
+ * This is needed since the normal rate limit based on suspending the thread that is
+ * exceeding the quota can affect the other clients on that same thread and the
+ * latency of the request as well.
+ * In this way we are not effecting other clients overall latency measurement.
+ */
 void shard_connection::send_empty_rate_limit_event() {
     if ( bufferevent_write(m_bev,"^\r\n",3) == 0 ){
         push_req(new request(rt_empty_rate_limit, 3, 0, 0));

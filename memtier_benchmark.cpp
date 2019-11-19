@@ -274,8 +274,6 @@ static void config_init_defaults(struct benchmark_config *cfg)
         cfg->requests = 10000;
     if (!cfg->hdr_prefix)
         cfg->key_prefix = "";
-    if (!cfg->save_hdr)
-        cfg->save_hdr = 0;
     if (!cfg->rate_limit_rps)
         cfg->rate_limit_rps = 0;
     if (!cfg->print_quantiles.is_defined())
@@ -503,7 +501,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->out_file = optarg;
                     break;
                 case o_hdr_file_prefix:
-                    cfg->save_hdr--;
                     cfg->hdr_prefix = optarg;
                     break;
                 case o_client_stats:
@@ -815,14 +812,15 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 }
-                case o_rate_limit_rps:
-                endptr = NULL;
-                cfg->rate_limit_rps = strtoull(optarg, &endptr, 10);
-                if (cfg->rate_limit_rps < 1 || !endptr || *endptr != '\0') {
-                    fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
-                    return -1;
+                case o_rate_limit_rps: {
+                    endptr = NULL;
+                    cfg->rate_limit_rps = strtoull(optarg, &endptr, 10);
+                    if (cfg->rate_limit_rps < 1 || !endptr || *endptr != '\0') {
+                        fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
+                        return -1;
+                    }
+                    break;
                 }
-                break;
 #ifdef USE_TLS
                 case o_tls:
                     cfg->tls = true;

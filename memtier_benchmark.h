@@ -95,7 +95,6 @@ struct benchmark_config {
     bool cluster_mode;
     struct arbitrary_command_list* arbitrary_commands;
     const char *hdr_prefix;
-    int save_hdr;
     unsigned long long rate_limit_rps;
 #ifdef USE_TLS
     bool tls;
