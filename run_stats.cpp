@@ -452,9 +452,53 @@ void run_stats::save_csv_arbitrary_commands(FILE *f, arbitrary_command_list& com
     }
 }
 
+bool run_stats::save_hdr_percentiles_print_format(struct hdr_histogram* hdr, char* filename){
+    bool result = false;
+    if(hdr_total_count( hdr )>0){
+        // Prepare output file
+        FILE *hdr_outfile;
+
+        hdr_outfile = fopen(filename, "w");
+        if (!hdr_outfile){
+            perror(filename);
+            return result;
+        }
+        hdr_percentiles_print(
+                hdr,
+                hdr_outfile,                      // File to write to
+                LATENCY_HDR_GRANULARITY,          // Granularity of printed values
+                LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
+                CLASSIC);                         // Format CLASSIC/CSV supported.
+        fclose(hdr_outfile);
+        result=true;
+    }
+    return result;
+}
+
+bool run_stats::save_hdr_log_format(struct hdr_histogram* hdr, char* filename, char* header){
+    bool result = false;
+    if(hdr_total_count( hdr )>0){
+        // Prepare output file
+        FILE *hdr_outfile;
+        struct timespec start_timespec;
+        struct timespec end_timespec;
+        TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
+        TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
+        hdr_outfile = fopen(filename, "w");
+        if (!hdr_outfile){
+            perror(filename);
+            return result;
+        }
+        hdr_log_write_header(hdr_outfile, header, &start_timespec);
+        hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, hdr);
+        fclose(hdr_outfile);
+        result = true;
+    }
+    return result;
+}
+
 bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
     if (config->hdr_prefix != NULL){
-
         struct hdr_histogram* m_totals_latency_histogram;
         hdr_init(
                 LATENCY_HDR_MIN_VALUE,          // Minimum value
@@ -468,40 +512,16 @@ bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
         for (unsigned int i=0; i<m_totals.m_ar_commands.size(); i++) {
             hdr_add(m_totals_latency_histogram,m_ar_commands_latency_histograms[i]);
         }
-        if(hdr_total_count( m_totals_latency_histogram )>0){
-            // Prepare output file
-            FILE *hdr_outfile;
-            char fmtbuf[1024];
-            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.txt", config->hdr_prefix, run_number);
-            fprintf(stderr, "Writing Full Run command HDR latency histogram results to %s...\n", fmtbuf);
-            hdr_outfile = fopen(fmtbuf, "w");
-            if (!hdr_outfile){
-                perror(config->hdr_prefix);
-                return false;
-            }
-            hdr_percentiles_print(
-                    m_totals_latency_histogram,
-                    hdr_outfile,                      // File to write to
-                    LATENCY_HDR_GRANULARITY,          // Granularity of printed values
-                    LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
-                    CLASSIC);                         // Format CLASSIC/CSV supported.
-            fclose(hdr_outfile);
+        // Prepare output file
+        char fmtbuf[1024];
 
-            struct timespec start_timespec;
-            struct timespec end_timespec;
-            TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
-            TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
-            snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.hgrm", config->hdr_prefix, run_number);
-            fprintf(stderr, "Writing Full Run command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
-            hdr_outfile = fopen(fmtbuf, "w");
-            if (!hdr_outfile){
-                perror(config->hdr_prefix);
-                return false;
-            }
-            hdr_log_write_header(hdr_outfile, "Full Run command HDR latency histogram results", &start_timespec);
-            hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_totals_latency_histogram);
-            fclose(hdr_outfile);
-        }
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.txt", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing Full Run command HDR latency histogram results to %s...\n", fmtbuf);
+        save_hdr_percentiles_print_format(m_totals_latency_histogram,fmtbuf);
+
+        snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_FULL_RUN_%d.hgrm", config->hdr_prefix, run_number);
+        fprintf(stderr, "Writing Full Run command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
+        save_hdr_log_format(m_totals_latency_histogram,fmtbuf,(char*)"Full Run command HDR latency histogram results");
     }
     return true;
 }
@@ -509,37 +529,15 @@ bool run_stats::save_hdr_full_run(benchmark_config *config,int run_number){
 bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
     if (config->hdr_prefix != NULL && (hdr_total_count( m_set_latency_histogram )>0) ){
         // Prepare output file
-        FILE *hdr_outfile;
         char fmtbuf[1024];
+
         snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_SET_command_run_%d.txt", config->hdr_prefix, run_number);
         fprintf(stderr, "Writing SET command HDR latency histogram results to %s...\n", fmtbuf);
-        hdr_outfile = fopen(fmtbuf, "w");
-        if (!hdr_outfile){
-            perror(config->hdr_prefix);
-            return false;
-        }
-        hdr_percentiles_print(
-            m_set_latency_histogram,
-            hdr_outfile,                      // File to write to
-            LATENCY_HDR_GRANULARITY,          // Granularity of printed values
-            LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
-            CLASSIC);                         // Format CLASSIC/CSV supported.
-        fclose(hdr_outfile);
+        save_hdr_percentiles_print_format(m_set_latency_histogram,fmtbuf);
 
-        struct timespec start_timespec;
-        struct timespec end_timespec;
-        TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
-        TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
         snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_SET_command_run_%d.hgrm", config->hdr_prefix, run_number);
         fprintf(stderr, "Writing SET command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
-        hdr_outfile = fopen(fmtbuf, "w");
-        if (!hdr_outfile){
-            perror(config->hdr_prefix);
-            return false;
-        }
-        hdr_log_write_header(hdr_outfile, "SET command HDR latency histogram results", &start_timespec);
-        hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_set_latency_histogram);
-        fclose(hdr_outfile);
+        save_hdr_log_format(m_set_latency_histogram,fmtbuf,(char*)"SET command HDR latency histogram results");
     }
     return true;
 }
@@ -547,83 +545,40 @@ bool run_stats::save_hdr_set_command(benchmark_config *config,int run_number) {
 bool run_stats::save_hdr_get_command(benchmark_config *config, int run_number){
     if (config->hdr_prefix != NULL && (hdr_total_count( m_get_latency_histogram )>0) ){
         // Prepare output file
-        FILE *hdr_outfile;
         char fmtbuf[1024];
+
         snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_GET_command_run_%d.txt", config->hdr_prefix, run_number);
         fprintf(stderr, "Writing GET command HDR latency histogram results to %s...\n", fmtbuf);
-        hdr_outfile = fopen(fmtbuf, "w");
-        if (!hdr_outfile){
-            perror(config->hdr_prefix);
-            return false;
-        }
-        hdr_percentiles_print(
-            m_get_latency_histogram,
-            hdr_outfile,                      // File to write to
-            LATENCY_HDR_GRANULARITY,          // Granularity of printed values
-            LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
-            CLASSIC);                         // Format CLASSIC/CSV supported.
-        fclose(hdr_outfile);
+        save_hdr_percentiles_print_format(m_get_latency_histogram,fmtbuf);
 
-        struct timespec start_timespec;
-        struct timespec end_timespec;
-        TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
-        TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
         snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_GET_command_run_%d.hgrm", config->hdr_prefix, run_number);
         fprintf(stderr, "Writing GET command HDR latency histogram results in HistogramLogProcessor format to %s...\n", fmtbuf);
-        hdr_outfile = fopen(fmtbuf, "w");
-        if (!hdr_outfile){
-            perror(config->hdr_prefix);
-            return false;
-        }
-        hdr_log_write_header(hdr_outfile, "GET command HDR latency histogram results", &start_timespec);
-        hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, m_get_latency_histogram);
-        fclose(hdr_outfile);
+        save_hdr_log_format(m_get_latency_histogram,fmtbuf,(char*)"GET command HDR latency histogram results");
     }
     return true;
 }
 
 bool run_stats::save_hdr_arbitrary_commands(benchmark_config *config,int run_number) {
     // save latency datacommand_list
-    arbitrary_command_list& command_list = *config->arbitrary_commands;
-    for (unsigned int i=0; i<command_list.size(); i++) {
-        std::string command_name = command_list[i].command_name;
+    if (config->hdr_prefix != NULL) {
 
-        if (config->hdr_prefix != NULL) {
+        arbitrary_command_list& command_list = *config->arbitrary_commands;
+        for (unsigned int i=0; i<command_list.size(); i++) {
+            std::string command_name = command_list[i].command_name;
+
             // Prepare output file
-            FILE *hdr_outfile;
             char fmtbuf[1024];
             struct hdr_histogram* hist = m_ar_commands_latency_histograms.at(i);
+
             snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_%s_command_run_%d.txt", config->hdr_prefix, command_name.c_str(),run_number);
             fprintf(stderr, "Writing %s command HDR latency histogram results to %s...\n", command_name.c_str(), fmtbuf);
-            hdr_outfile = fopen(fmtbuf, "w");
-            if (!hdr_outfile){
-                perror(config->hdr_prefix);
-                return false;
-            }
-            hdr_percentiles_print(
-                hist,
-                hdr_outfile,                      // File to write to
-                LATENCY_HDR_GRANULARITY,          // Granularity of printed values
-                LATENCY_HDR_RESULTS_MULTIPLIER,   // Multiplier for results
-                CLASSIC);                         // Format CLASSIC/CSV supported.
-            fclose(hdr_outfile);
+            save_hdr_percentiles_print_format(hist,fmtbuf);
 
-            struct timespec start_timespec;
-            struct timespec end_timespec;
-            TIMEVAL_TO_TIMESPEC(&m_start_time, &start_timespec);
-            TIMEVAL_TO_TIMESPEC(&m_end_time, &end_timespec);
             snprintf(fmtbuf, sizeof(fmtbuf) - 1, "%s_%s_command_run_%d.hgrm", config->hdr_prefix, command_name.c_str(), run_number);
             fprintf(stderr, "Writing %s command HDR latency histogram results in HistogramLogProcessor format to %s...\n", command_name.c_str(), fmtbuf);
-            hdr_outfile = fopen(fmtbuf, "w");
-            if (!hdr_outfile){
-                perror(config->hdr_prefix);
-                return false;
-            }
             char header[1024];
             snprintf(header, sizeof(header) - 1, "%s command HDR latency histogram results", command_name.c_str());
-            hdr_log_write_header(hdr_outfile, header, &start_timespec);
-            hdr_log_write(hdr_outfile, &start_timespec, &end_timespec, hist);
-            fclose(hdr_outfile);
+            save_hdr_log_format(hist,fmtbuf,header);
         }
     }
     return true;
