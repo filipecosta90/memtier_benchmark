@@ -31,11 +31,6 @@
 #include "deps/hdr_histogram/hdr_histogram.h"
 #include "deps/hdr_histogram/hdr_histogram_log.h"
 
-#define LATENCY_HDR_MIN_VALUE 1
-#define LATENCY_HDR_MAX_VALUE 60000000 ## LL
-#define LATENCY_HDR_SIGDIGTS 3
-#define LATENCY_HDR_RESULTS_MULTIPLIER 1000
-#define LATENCY_HDR_GRANULARITY 10
 
 inline long long int ts_diff(struct timeval a, struct timeval b)
 {

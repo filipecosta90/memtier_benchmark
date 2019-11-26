@@ -276,8 +276,8 @@ static void config_init_defaults(struct benchmark_config *cfg)
         cfg->key_prefix = "";
     if (!cfg->rate_limit_rps)
         cfg->rate_limit_rps = 0;
-    if (!cfg->print_quantiles.is_defined())
-        cfg->print_quantiles = config_quantiles("50,99,99.9");
+    if (!cfg->print_percentiles.is_defined())
+        cfg->print_percentiles = config_quantiles("50,99,99.9");
 }
 
 static int generate_random_seed()
@@ -366,7 +366,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_key_median,
         o_show_config,
         o_hide_histogram,
-        o_print_quantiles,
+        o_print_percentiles,
         o_distinct_client_seed,
         o_randomize,
         o_client_stats,
@@ -411,7 +411,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "debug",                      0, 0, 'D' },
         { "show-config",                0, 0, o_show_config },
         { "hide-histogram",             0, 0, o_hide_histogram },
-        { "print-quantiles",            1, 0, o_print_quantiles },
+        { "print-percentiles",          1, 0, o_print_percentiles },
         { "distinct-client-seed",       0, 0, o_distinct_client_seed },
         { "randomize",                  0, 0, o_randomize },
         { "requests",                   1, 0, 'n' },
@@ -523,9 +523,9 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                 case o_hide_histogram:
                     cfg->hide_histogram++;
                     break;
-                case o_print_quantiles:
-                    cfg->print_quantiles = config_quantiles(optarg);
-                    if (!cfg->print_quantiles.is_defined()) {
+                case o_print_percentiles:
+                    cfg->print_percentiles = config_quantiles(optarg);
+                    if (!cfg->print_percentiles.is_defined()) {
                         fprintf(stderr, "error: quantiles must be expressed as [0.0-100.0],[0.0-100.0](,...) .\n");
                         return -1;
                     }
@@ -880,7 +880,7 @@ void usage() {
             "      --hdr-file-prefix=FILE     Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
             "      --show-config              Print detailed configuration before running\n"
             "      --hide-histogram           Don't print detailed latency histogram\n"
-            "      --print-quantiles          Specify which quantile info to print on the results table (by default prints quantiles: 50,99,99.9)\n"
+            "      --print-percentiles        Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
             "      --cluster-mode             Run client in cluster mode\n"
             "      --help                     Display this help\n"
             "      --version                  Display version information\n"
@@ -899,7 +899,8 @@ void usage() {
             "      --distinct-client-seed     Use a different random seed for each client\n"
             "      --randomize                random seed based on timestamp (default is constant value)\n"
             "      --rate-limit-rps=NUM       Limit the request rate to the specified rate per second. By default no limit is set.\n"
-            "                                 For example: --rate-limit-rps=10000.\n"
+            "                                 To achieve a stable load pattern, the rate of commands per second needs to be higher\n"
+            "                                 than the total number of connections. For example: --rate-limit-rps=10000.\n"
             "\n"
             "Arbitrary command:\n"
             "      --command=COMMAND          Specify a command to send in quotes.\n"
@@ -1191,8 +1192,8 @@ int main(int argc, char *argv[])
     }
 
     config_init_defaults(&cfg);
-    // We need this here since the the defaults might change the calculations
-    // The rate of commands per second needs to be higher that the total number of connections
+    // We need this here since the defaults might change the calculations
+    // The rate of commands per second needs to be higher than the total number of connections
     if ( ( cfg.rate_limit_rps > 0 ) && ( cfg.rate_limit_rps < cfg.clients*cfg.threads) ) {
         benchmark_error_log("error: rate-limit-rps value (%llu) must be higher than the expected established connections (%d).\n",
                 cfg.rate_limit_rps,

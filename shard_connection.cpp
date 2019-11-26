@@ -149,7 +149,7 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
 
     if (config->rate_limit_rps > 0 ){
         unsigned long long total_num_of_connections = config->clients * config->threads;
-        double connection_rate_limit = config->rate_limit_rps /(double) total_num_of_connections;
+        double connection_rate_limit = (double)(config->rate_limit_rps) /(double) total_num_of_connections;
         rate_limiter = new RateLimiter();
         rate_limiter->set_rate(1,connection_rate_limit);
     }

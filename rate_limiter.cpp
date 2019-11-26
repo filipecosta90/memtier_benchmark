@@ -43,6 +43,7 @@ bool RateLimiter::set_rate(long long period_secs,double rate) {
         result = false;
     } else {
         emission_interval = double ( period_secs * 1000000.0 ) / rate;
+        result = true;
     }
     return result;
 }

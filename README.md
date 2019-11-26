@@ -137,7 +137,7 @@ When used for normally distributed data, the samples are usually taken at regula
 
 
 By default Memtier will output the 50th, 99th, and 99.9th percentiles. They are the latency thresholds at which 50%, 99%, and 99.9% of commands are faster than that particular presented value. 
-To output different percentiles you should use the --print-quantiles option followed by the comma separated list of values ( example: `--print-quantiles 90,99,99.9,99.99` ).
+To output different percentiles you should use the --print-percentiles option followed by the comma separated list of values ( example: `--print-percentiles 90,99,99.9,99.99` ).
 
 #### Saving the full latency spectrum
 To save the full latencies you should use the --hdr-file-prefix option followed by the prefix name you wish the filenames to have. 
@@ -153,5 +153,5 @@ Sample Visual Feel of the full latency spectrum using an [online formatter](http
 
 ### Sustainable Throughput
 To really understand a system behavior we also cant really solely on doing the full percentile analysis while stressing the system to it's maximum RPS. We need to be able to compare the behavior under different throughput's and/or configurations, to be able to get the best "Sustainable Throughput" - The throughput achieved while safely maintaining service levels.
-By default no limit is specified and memtier_benchmark will try to stress redis up to its most. 
-To enable limiting the rate of commands per second, you should use the --rate-limit-rps option followed by the rate value.
+
+By default no limit is specified and memtier_benchmark will try to stress redis up to its most. To enable limiting the rate of commands per second, you should use the --rate-limit-rps option followed by the rate value. To achieve a stable load pattern, the rate of commands per second needs to be higher than the total number of connections.

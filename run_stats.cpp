@@ -37,6 +37,11 @@
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
+#define LATENCY_HDR_MIN_VALUE 1
+#define LATENCY_HDR_MAX_VALUE 60000000 ## LL
+#define LATENCY_HDR_SIGDIGTS 3
+#define LATENCY_HDR_RESULTS_MULTIPLIER 1000
+#define LATENCY_HDR_GRANULARITY 10
 
 void output_table::add_column(table_column& col) {
     assert(columns.empty() || columns[0].elements.size() == col.elements.size());
@@ -1140,8 +1145,8 @@ void run_stats::print(FILE *out, benchmark_config *config,
     // Latency column
     print_avg_latency_column(table);
 
-    for (std::size_t i = 0; i < config->print_quantiles.quantile_list.size(); i++){
-        float quantile = config->print_quantiles.quantile_list[i];
+    for (std::size_t i = 0; i < config->print_percentiles.quantile_list.size(); i++){
+        float quantile = config->print_percentiles.quantile_list[i];
         char average_header[50];
         int ndigts = 0;
         float num = abs(quantile);

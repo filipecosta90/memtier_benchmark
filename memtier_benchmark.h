@@ -53,7 +53,7 @@ struct benchmark_config {
     int debug;
     int show_config;
     int hide_histogram;
-    config_quantiles print_quantiles;
+    config_quantiles print_percentiles;
     int distinct_client_seed;
     int randomize;
     int next_client_idx;
