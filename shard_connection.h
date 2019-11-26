@@ -174,8 +174,6 @@ private:
     struct bufferevent *m_bev;
     struct event_base* m_event_base;
 
-    bool limited;
-
     abstract_protocol* m_protocol;
     std::queue<request *>* m_pipeline;
 

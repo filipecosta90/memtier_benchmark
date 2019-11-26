@@ -130,7 +130,6 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
     m_conns_manager = conns_man;
     m_config = config;
     m_event_base = event_base;
-    limited = false;
 
     if (m_config->unix_socket) {
         m_unix_sockaddr = (struct sockaddr_un *) malloc(sizeof(struct sockaddr_un));
@@ -480,6 +479,7 @@ void shard_connection::fill_pipeline(void)
 {
     struct timeval now;
     gettimeofday(&now, NULL);
+    bool limited = false;
 
     if ( rate_limiter != NULL ){
         long long quantity = m_config->pipeline - m_pipeline->size();
