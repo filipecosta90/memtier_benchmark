@@ -36,7 +36,7 @@
 
 random_generator::random_generator()
 {
-    set_seed(0);
+    set_seed(DEFAULT_RANDOM_SEED);
 }
 
 void random_generator::set_seed(int seed)

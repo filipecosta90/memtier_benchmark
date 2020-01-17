@@ -50,6 +50,7 @@
 
 #include "client.h"
 #include "cluster_client.h"
+#include "config_types.h"
 
 
 bool client::setup_client(benchmark_config *config, abstract_protocol *protocol, object_generator *objgen)
@@ -256,8 +257,14 @@ void client::create_arbitrary_request(const arbitrary_command* cmd, struct timev
 
             assert(key != NULL);
             assert(key_len > 0);
-
-            cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, key, key_len);
+            //when we have static data mixed with the key placeholder
+            if (arg->data.length() != strlen(KEY_PLACEHOLDER)) {
+                std::string str (arg->data);
+                str.replace(str.find(KEY_PLACEHOLDER),strlen(KEY_PLACEHOLDER),key);
+                cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, str.c_str(), str.length() );
+            } else{
+                cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, key, key_len);
+            }
         } else if (arg->type == data_type) {
             unsigned int value_len;
             const char *value = m_obj_gen->get_value(0, &value_len);

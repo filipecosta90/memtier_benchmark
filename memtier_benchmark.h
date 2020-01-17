@@ -28,6 +28,7 @@
 
 #define LOGLEVEL_ERROR 0
 #define LOGLEVEL_DEBUG 1
+#define DEFAULT_RANDOM_SEED 0
 
 #define benchmark_debug_log(...) \
     benchmark_log_file_line(LOGLEVEL_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
@@ -96,6 +97,7 @@ struct benchmark_config {
     struct arbitrary_command_list* arbitrary_commands;
     const char *hdr_prefix;
     unsigned long long rate_limit_rps;
+    int initial_random_seed;
 #ifdef USE_TLS
     bool tls;
     const char *tls_cert;

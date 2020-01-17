@@ -30,7 +30,6 @@
 #include "protocol.h"
 #include "memtier_benchmark.h"
 #include "libmemcached_protocol/binary.h"
-
 /////////////////////////////////////////////////////////////////////////
 
 abstract_protocol::abstract_protocol() :
@@ -570,21 +569,14 @@ bool redis_protocol::format_arbitrary_command(arbitrary_command &cmd) {
     for (unsigned int i = 0; i < cmd.command_args.size(); i++) {
         command_arg* current_arg = &cmd.command_args[i];
         current_arg->type = const_type;
-
         // check arg type
         if (current_arg->data.find(KEY_PLACEHOLDER) != std::string::npos) {
-            if (current_arg->data.length() != strlen(KEY_PLACEHOLDER)) {
-                benchmark_error_log("error: key placeholder can't combined with other data\n");
-                return false;
-            }
-
             current_arg->type = key_type;
         } else if (current_arg->data.find(DATA_PLACEHOLDER) != std::string::npos) {
             if (current_arg->data.length() != strlen(DATA_PLACEHOLDER)) {
                 benchmark_error_log("error: data placeholder can't combined with other data\n");
                 return false;
             }
-
             current_arg->type = data_type;
         }
 
