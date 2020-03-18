@@ -360,6 +360,15 @@ bool cluster_client::get_key_for_conn(unsigned int conn_id, int iter, unsigned l
 // This function could use some urgent TLC -- but we need to do it without altering the behavior
 void cluster_client::create_request(struct timeval timestamp, unsigned int conn_id)
 {
+    // are we using arbitrary command?
+    if (m_config->arbitrary_commands->is_defined()) {
+        const arbitrary_command* executed_command = m_config->arbitrary_commands->get_next_executed_command(m_arbitrary_command_ratio_count,
+                                                                                                      m_executed_command_index);
+        create_arbitrary_request(executed_command, timestamp, conn_id);
+
+        return;
+    }
+
     // If the Set:Wait ratio is not 0, start off with WAITs
     if (m_config->wait_ratio.b &&
         (m_tot_wait_ops == 0 ||
@@ -415,14 +424,34 @@ void cluster_client::create_request(struct timeval timestamp, unsigned int conn_
 void cluster_client::handle_moved(unsigned int conn_id, struct timeval timestamp,
                                   request *request, protocol_response *response) {
     // update stats
+    switch (request->m_type) {
+        case rt_get:
+            m_stats.update_moved_set_op(&timestamp,
+                                    request->m_size + response->get_total_len(),
+                                    ts_diff(request->m_sent_time, timestamp));
+            break;
+        case rt_set:
+            m_stats.update_moved_set_op(&timestamp,
+                                    request->m_size + response->get_total_len(),
+                                    ts_diff(request->m_sent_time, timestamp));
+            break;
+        case rt_arbitrary: {
+            arbitrary_request *ar = static_cast<arbitrary_request *>(request);
+            m_stats.update_moved_arbitrary_op(&timestamp,
+                                        request->m_size + response->get_total_len(),
+                                        ts_diff(request->m_sent_time, timestamp),
+                                        ar->index);
+            break;
+        }
+        default:
+            assert(0);
+            break;
+    }
+
     if (request->m_type == rt_get) {
-        m_stats.update_moved_get_op(&timestamp,
-                                    request->m_size + response->get_total_len(),
-                                    ts_diff(request->m_sent_time, timestamp));
+
     } else if (request->m_type == rt_set) {
-        m_stats.update_moved_set_op(&timestamp,
-                                    request->m_size + response->get_total_len(),
-                                    ts_diff(request->m_sent_time, timestamp));
+
     } else {
         assert(0);
     }

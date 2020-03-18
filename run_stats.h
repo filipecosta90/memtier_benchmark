@@ -119,6 +119,8 @@ public:
 
     void update_moved_get_op(struct timeval* ts, unsigned int bytes, unsigned int latency);
     void update_moved_set_op(struct timeval* ts, unsigned int bytes, unsigned int latency);
+    void update_moved_arbitrary_op(struct timeval *ts, unsigned int bytes,
+                             unsigned int latency, size_t arbitrary_index);
 
     void update_ask_get_op(struct timeval* ts, unsigned int bytes, unsigned int latency);
     void update_ask_set_op(struct timeval* ts, unsigned int bytes, unsigned int latency);
