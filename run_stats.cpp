@@ -216,8 +216,8 @@ void run_stats::update_moved_arbitrary_op(struct timeval *ts, unsigned int bytes
     m_cur_stats.m_ar_commands.at(request_index).update_moved_op(bytes, latency);
     m_totals.update_op(bytes, latency);
 
-    struct hdr_histogram* hist = m_ar_commands_latency_histograms.at(request_index);
-    hdr_record_value(hist,latency);
+    latency_map& map = m_ar_commands_latency_maps.at(request_index);
+    map[get_2_meaningful_digits((float)latency/1000)]++;
 }
 
 void run_stats::update_ask_get_op(struct timeval* ts, unsigned int bytes, unsigned int latency)
@@ -238,6 +238,17 @@ void run_stats::update_ask_set_op(struct timeval* ts, unsigned int bytes, unsign
     m_totals.update_op(bytes, latency);
 
     m_set_latency_map[get_2_meaningful_digits((float)latency/1000)]++;
+}
+
+void run_stats::update_ask_arbitrary_op(struct timeval *ts, unsigned int bytes,
+                                          unsigned int latency, size_t request_index) {
+    roll_cur_stats(ts);
+
+    m_cur_stats.m_ar_commands.at(request_index).update_ask_op(bytes, latency);
+    m_totals.update_op(bytes, latency);
+
+    latency_map& map = m_ar_commands_latency_maps.at(request_index);
+    map[get_2_meaningful_digits((float)latency/1000)]++;
 }
 
 void run_stats::update_wait_op(struct timeval *ts, unsigned int latency)

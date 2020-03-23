@@ -87,13 +87,13 @@ def addTLSArgs(benchmark_specs, env):
         benchmark_specs['args'].append('--cacert={}'.format(TLS_CACERT))
 
 
-def get_default_memtier_config():
+def get_default_memtier_config(threads=10, clients=5, requests=1000):
     config = {
         "memtier_benchmark": {
             "binary": MEMTIER_BINARY,
-            "threads": 10,
-            "clients": 5,
-            "requests": 1000
+            "threads": threads,
+            "clients": clients,
+            "requests": requests
         },
     }
     return config
