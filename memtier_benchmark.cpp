@@ -1348,7 +1348,6 @@ int main(int argc, char *argv[])
             fprintf(stderr, "error: random-data cannot be specified when importing.\n");
             exit(1);
         }
-
         if (!cfg.generate_keys &&
             (cfg.key_maximum || cfg.key_minimum || cfg.key_prefix)) {
                 fprintf(stderr, "error: use key-minimum, key-maximum and key-prefix only with generate-keys.\n");
@@ -1377,6 +1376,24 @@ int main(int argc, char *argv[])
             exit(1);
         }
     }
+//    if (!cfg.data_import || cfg.generate_keys) {
+//        const unsigned long long total_num_of_clients = cfg.clients*cfg.threads;
+//        const unsigned long long range_size = (cfg.key_maximum - cfg.key_minimum) + 1;
+//        bool has_parallel_pattern = false;
+//        if ( cfg.key_pattern[key_pattern_set]=='P' || cfg.key_pattern[key_pattern_get]!='P' ) {
+//            has_parallel_pattern = true;
+//        }
+//        for (size_t i = 0; i<cfg.arbitrary_commands->size(); i++) {
+//            arbitrary_command& cmd =  cfg.arbitrary_commands->at(i);
+//            if (cmd.key_pattern == 'P') {
+//                has_parallel_pattern = true;
+//            }
+//        }
+//        if ( range_size < total_num_of_clients && has_parallel_pattern ) {
+//            fprintf(stderr, "error: the specificied key range [%lld,%lld] results is a range size of %lld which is less than the total number of connections %lld.\n",cfg.key_minimum,cfg.key_maximum,range_size,total_num_of_clients);
+//            exit(1);
+//        }
+//    }
 
     if (cfg.authenticate) {
         if (strcmp(cfg.protocol, "redis") != 0  &&
