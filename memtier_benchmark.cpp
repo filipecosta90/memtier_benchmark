@@ -1010,7 +1010,7 @@ void size_to_str(unsigned long int size, char *buf, int buf_len)
     }
 }
 
-run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj_gen)
+run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj_gen,json_handler * jsonhandler)
 {
     fprintf(stderr, "[RUN #%u] Preparing benchmark client...\n", run_id);
 
@@ -1105,10 +1105,22 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
     // join all threads back and unify stats
     run_stats stats(cfg);
-
+    if (jsonhandler != NULL && run_id == 1){
+        jsonhandler->open_nesting("Client keyspace distribution");
+    }
     for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
         (*i)->join();
+        if (jsonhandler != NULL){
+            char header[50];
+            sprintf(header,"thread-%u", (*i)->m_thread_id+1);
+            jsonhandler->open_nesting(header);
+            (*i)->m_cg->write_json_stats(jsonhandler);
+            jsonhandler->close_nesting();
+        }
         (*i)->m_cg->merge_run_stats(&stats);
+    }
+    if (jsonhandler != NULL){
+        jsonhandler->close_nesting();
     }
 
     // Do we need to produce client stats?
@@ -1376,24 +1388,6 @@ int main(int argc, char *argv[])
             exit(1);
         }
     }
-//    if (!cfg.data_import || cfg.generate_keys) {
-//        const unsigned long long total_num_of_clients = cfg.clients*cfg.threads;
-//        const unsigned long long range_size = (cfg.key_maximum - cfg.key_minimum) + 1;
-//        bool has_parallel_pattern = false;
-//        if ( cfg.key_pattern[key_pattern_set]=='P' || cfg.key_pattern[key_pattern_get]!='P' ) {
-//            has_parallel_pattern = true;
-//        }
-//        for (size_t i = 0; i<cfg.arbitrary_commands->size(); i++) {
-//            arbitrary_command& cmd =  cfg.arbitrary_commands->at(i);
-//            if (cmd.key_pattern == 'P') {
-//                has_parallel_pattern = true;
-//            }
-//        }
-//        if ( range_size < total_num_of_clients && has_parallel_pattern ) {
-//            fprintf(stderr, "error: the specificied key range [%lld,%lld] results is a range size of %lld which is less than the total number of connections %lld.\n",cfg.key_minimum,cfg.key_maximum,range_size,total_num_of_clients);
-//            exit(1);
-//        }
-//    }
 
     if (cfg.authenticate) {
         if (strcmp(cfg.protocol, "redis") != 0  &&
@@ -1482,7 +1476,7 @@ int main(int argc, char *argv[])
             if (run_id > 1)
                 sleep(1);   // let connections settle
 
-            run_stats stats = run_benchmark(run_id, &cfg, obj_gen);
+            run_stats stats = run_benchmark(run_id, &cfg, obj_gen, jsonhandler);
             all_stats.push_back(stats);
         }
         //

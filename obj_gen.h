@@ -140,6 +140,8 @@ public:
     const char * get_key_prefix();
     const char* get_value(unsigned long long key_index, unsigned int *len);
     unsigned int get_expiry();
+    unsigned long long get_key_range_min(void) { return m_key_min; }
+    unsigned long long get_key_range_max(void) { return m_key_max; }
 };
 
 class imported_keylist;

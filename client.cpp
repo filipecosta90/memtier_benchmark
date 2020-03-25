@@ -71,27 +71,29 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
     else if (config->distinct_client_seed)
         m_obj_gen->set_random_seed(config->next_client_idx);
 
+    const unsigned long long total_num_of_clients = config->clients*config->threads;
+    client_index = config->next_client_idx % total_num_of_clients;
+
     // Parallel key-pattern determined according to the first command
     if ((config->arbitrary_commands->is_defined() && config->arbitrary_commands->at(0).key_pattern == 'P') ||
         (config->key_pattern[key_pattern_set]=='P')) {
-        const unsigned long long total_num_of_clients = config->clients*config->threads;
-        const unsigned long long client_index = config->next_client_idx % total_num_of_clients;
-        const unsigned long long key_range_size = config->key_maximum - config->key_minimum;
+        unsigned long long key_range_size = config->key_maximum - config->key_minimum;
+        if (config->key_minimum!=0){
+            key_range_size++;
+        }
         unsigned long long range = key_range_size/total_num_of_clients+1;
         unsigned long long min = config->key_minimum + (range * client_index);
         unsigned long long max = min + range -1;
-        if ( (total_num_of_clients ) > key_range_size ){
-            benchmark_debug_log("total key range [ %lld , %lld ] is smaller than number of total clients %d.\n", config->key_minimum, config->key_maximum,total_num_of_clients );
-            range = 1;
-            min = client_index % key_range_size +1;
-            max = min;
-        }
         if (client_index == (total_num_of_clients - 1) || max > config->key_maximum) {
             max = config->key_maximum; //the last clients takes the leftover
         }
+        if ( (total_num_of_clients ) > key_range_size ){
+            benchmark_debug_log("total key range [ %lld , %lld ] is smaller than number of total clients %d.\n", config->key_minimum, config->key_maximum,total_num_of_clients );
+            range = 1;
+            min = config->key_minimum + (client_index % key_range_size);
+            max = min;
+        }
         benchmark_debug_log("client_index %lld min-max [ %lld , %lld ].\n", client_index, min, max );
-
-
         m_obj_gen->set_key_range(min, max);
     }
     config->next_client_idx++;
@@ -655,6 +657,26 @@ void client_group::write_client_stats(const char *prefix)
         snprintf(filename, sizeof(filename)-1, "%s-%u.csv", prefix, client_id++);
         if (!(*i)->get_stats()->save_csv(filename, m_config)) {
             fprintf(stderr, "error: %s: failed to write client stats.\n", filename);
+        }
+    }
+}
+
+
+void client_group::write_json_stats(json_handler * jsonhandler)
+{
+    if( jsonhandler != NULL ){
+        unsigned int client_id = 1;
+        for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
+            char clientname[50];
+
+            snprintf(clientname, sizeof(clientname)-1, "client-%u", client_id++);
+            jsonhandler->open_nesting(clientname);
+            const unsigned long long m_key_min = (*i)->get_obj_gen()->get_key_range_min();
+            const unsigned long long m_key_max = (*i)->get_obj_gen()->get_key_range_max();
+            jsonhandler->write_obj("key_min" ,"%lld", m_key_min);
+            jsonhandler->write_obj("key_max" ,"%lld", m_key_max);
+            jsonhandler->write_obj("client_index" ,"%lld", (*i)->get_client_index());
+            jsonhandler->close_nesting();
         }
     }
 }

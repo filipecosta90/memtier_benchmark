@@ -37,6 +37,7 @@
 #include "obj_gen.h"
 #include "memtier_benchmark.h"
 #include "run_stats.h"
+#include "JSON_handler.h"
 
 #define MAIN_CONNECTION m_connections[0]
 
@@ -60,6 +61,7 @@ protected:
     benchmark_config* m_config;
     object_generator* m_obj_gen;
     run_stats m_stats;
+    unsigned long long client_index;
 
     unsigned long long m_reqs_processed;      // requests processed (responses received)
     unsigned long long m_reqs_generated;      // requests generated (wait for responses)
@@ -83,6 +85,8 @@ public:
     bool initialized(void);
 
     run_stats* get_stats(void) { return &m_stats; }
+    object_generator* get_obj_gen(void) { return m_obj_gen; }
+    unsigned long long get_client_index(void) { return client_index; }
 
     // client manager api's
     unsigned long long get_reqs_processed() {
@@ -175,6 +179,7 @@ public:
     void run(void);
 
     void write_client_stats(const char *prefix);
+    void write_json_stats(json_handler * jsonhandler);
 
     struct event_base *get_event_base(void) { return m_base; }
     benchmark_config *get_config(void) { return m_config; }
