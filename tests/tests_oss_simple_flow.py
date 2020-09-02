@@ -5,9 +5,6 @@ from mbdirector.benchmark import Benchmark
 from mbdirector.runner import RunConfig
 
 
-# from tests.include import *
-
-
 def test_default_set_get(env):
     benchmark_specs = {"name": env.testName, "args": []}
     addTLSArgs(benchmark_specs, env)

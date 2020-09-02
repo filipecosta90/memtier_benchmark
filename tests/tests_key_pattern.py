@@ -5,9 +5,6 @@ from mbdirector.benchmark import Benchmark
 from mbdirector.runner import RunConfig
 
 
-# from tests.include import *
-
-
 def test_key_pattern_parallel(env):
     benchmark_specs = {"name": env.testName, "args": ['--key-pattern=P:P']}
     threads = 10

@@ -393,7 +393,7 @@ void cluster_client::create_arbitrary_request(const arbitrary_command* cmd, stru
     }
 
     m_connections[conn_id]->send_arbitrary_command_end(m_executed_command_index, &timestamp, cmd_size);
-//    m_reqs_generated++;
+    m_reqs_generated++;
 }
 
 // This function could use some urgent TLC -- but we need to do it without altering the behavior

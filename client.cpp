@@ -76,12 +76,15 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
     if ((config->arbitrary_commands->is_defined() && config->arbitrary_commands->at(0).key_pattern == 'P') ||
         (config->key_pattern[key_pattern_set]=='P')) {
         unsigned long long client_index = config->next_client_idx % total_num_of_clients;
+
         unsigned long long range = (config->key_maximum - config->key_minimum)/total_num_of_clients + 1;
         unsigned long long min = config->key_minimum + (range * client_index);
         unsigned long long max = min + range - 1;
+
         if (client_index == (total_num_of_clients - 1)) {
             max = config->key_maximum; //the last clients takes the leftover
         }
+        
         m_obj_gen->set_key_range(min, max);
     }
     config->next_client_idx++;
