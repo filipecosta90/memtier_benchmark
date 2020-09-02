@@ -1047,6 +1047,8 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
         threads.push_back(t);
     }
 
+    const unsigned long full_benchmark_ops = cfg->requests*cfg->clients*cfg->threads;
+
     // launch threads
     fprintf(stderr, "[RUN #%u] Launching threads now...\n", run_id);
     for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
@@ -1054,6 +1056,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
     }
 
     unsigned long int prev_ops = 0;
+    unsigned long int total_ops = 0;
     unsigned long int prev_bytes = 0;
     unsigned long int prev_duration = 0;
     double prev_latency = 0, cur_latency = 0;
@@ -1066,7 +1069,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
         active_threads = 0;
         sleep(1);
 
-        unsigned long int total_ops = 0;
+        total_ops = 0;
         unsigned long int total_bytes = 0;
         unsigned long int duration = 0;
         unsigned int thread_counter = 0;
@@ -1113,13 +1116,13 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
         double progress = 0;
         if(cfg->requests)
-            progress = 100.0 * total_ops / ((double)cfg->requests*cfg->clients*cfg->threads);
+            progress = 100.0 * total_ops / ((double)full_benchmark_ops);
         else
             progress = 100.0 * (duration / 1000000.0)/cfg->test_time;
 
         fprintf(stderr, "[RUN #%u %.0f%%, %3u secs] %2u threads: %11lu ops, %7lu (avg: %7lu) ops/sec, %s/sec (avg: %s/sec), %5.2f (avg: %5.2f) msec latency\r",
             run_id, progress, (unsigned int) (duration / 1000000), active_threads, total_ops, cur_ops_sec, ops_sec, cur_bytes_str, bytes_str, cur_latency, avg_latency);
-    } while (active_threads > 0);
+    } while (active_threads > 0 && (total_ops<full_benchmark_ops));
 
     fprintf(stderr, "\n\n");
 
