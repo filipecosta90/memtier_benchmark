@@ -549,3 +549,4 @@ void cluster_client::handle_response(unsigned int conn_id, struct timeval timest
     // continue with base class
     client::handle_response(conn_id, timestamp, request, response);
 }
+

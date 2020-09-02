@@ -84,7 +84,7 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
         if (client_index == (total_num_of_clients - 1)) {
             max = config->key_maximum; //the last clients takes the leftover
         }
-        
+
         m_obj_gen->set_key_range(min, max);
     }
     config->next_client_idx++;
