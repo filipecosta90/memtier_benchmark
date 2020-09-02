@@ -377,7 +377,7 @@ void cluster_client::create_arbitrary_request(const arbitrary_command* cmd, stru
                 return;
             }
 
-            assert(key_index != NULL);
+            assert(key_index != 0);
             assert(m_key_len > 0);
 
             cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, m_key_buffer, m_key_len);
@@ -549,4 +549,3 @@ void cluster_client::handle_response(unsigned int conn_id, struct timeval timest
     // continue with base class
     client::handle_response(conn_id, timestamp, request, response);
 }
-
