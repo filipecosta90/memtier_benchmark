@@ -56,6 +56,7 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
 {
     m_config = config;
     assert(m_config != NULL);
+    const unsigned long long total_num_of_clients = config->clients*config->threads;
 
     // create main connection
     shard_connection* conn = new shard_connection(m_connections.size(), this, m_config, m_event_base, protocol);
@@ -71,7 +72,6 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
     else if (config->distinct_client_seed)
         m_obj_gen->set_random_seed(config->next_client_idx);
 
-    const unsigned long long total_num_of_clients = config->clients*config->threads;
     client_index = config->next_client_idx % total_num_of_clients;
 
     // Parallel key-pattern determined according to the first command
@@ -81,6 +81,7 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
         if (config->key_minimum!=0){
             key_range_size++;
         }
+        unsigned long long client_index = config->next_client_idx % total_num_of_clients;
         unsigned long long range = key_range_size/total_num_of_clients+1;
         unsigned long long min = config->key_minimum + (range * client_index);
         unsigned long long max = min + range -1;

@@ -63,17 +63,17 @@ protected:
     run_stats m_stats;
     unsigned long long client_index;
 
-    unsigned long long m_reqs_processed;      // requests processed (responses received)
-    unsigned long long m_reqs_generated;      // requests generated (wait for responses)
-    unsigned int m_set_ratio_count;     // number of sets counter (overlaps on ratio)
-    unsigned int m_get_ratio_count;     // number of gets counter (overlaps on ratio)
+    unsigned long long m_reqs_processed;          // requests processed (responses received)
+    unsigned long long m_reqs_generated;          // requests generated (wait for responses)
+    unsigned int m_set_ratio_count;               // number of sets counter (overlaps on ratio)
+    unsigned int m_get_ratio_count;               // number of gets counter (overlaps on ratio)
     unsigned int m_arbitrary_command_ratio_count; // number of arbitrary commands counter (overlaps on ratio)
-    unsigned int m_executed_command_index; // current arbitrary command executed
+    unsigned int m_executed_command_index;        // current arbitrary command executed
 
-    unsigned long long m_tot_set_ops;        // Total number of SET ops
-    unsigned long long m_tot_wait_ops;       // Total number of WAIT ops
+    unsigned long long m_tot_set_ops;             // Total number of SET ops
+    unsigned long long m_tot_wait_ops;            // Total number of WAIT ops
 
-    keylist *m_keylist;                 // used to construct multi commands
+    keylist *m_keylist;                           // used to construct multi commands
 
 public:
     client(client_group* group);
