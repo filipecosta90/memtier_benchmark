@@ -88,7 +88,7 @@ def test_key_pattern_parallel_small_key_range(env):
     threads = 10
     clients = 5
     key_minimum = 1
-    key_maximum = 10
+    key_maximum = 50
     benchmark_specs = {"name": env.testName, "args": ['--key-pattern=P:P', '--key-minimum={}'.format(key_minimum),
                                                       '--key-maximum={}'.format(key_maximum)]}
     key_range_size = key_maximum - key_minimum + 1
@@ -111,10 +111,6 @@ def test_key_pattern_parallel_small_key_range(env):
     # benchmark.run() returns True if the return code of memtier_benchmark was 0
     memtier_ok = benchmark.run()
     debugPrintMemtierOnError(config, env, memtier_ok)
-    with open('{0}/mb.json'.format(config.results_dir)) as mn_json:
-        memtier_json_output = json.load(mn_json)
-        assert_ParallelKeyspaceDistribution_RoundRobin(clients, env, key_minimum, key_range_size, memtier_json_output,
-                                                       threads)
 
     master_nodes_connections = env.getOSSMasterNodesConnectionList()
     merged_command_stats = {'cmdstat_set': {'calls': 0}, 'cmdstat_get': {'calls': 0}}
@@ -127,7 +123,7 @@ def test_key_pattern_parallel_small_key_range_arbitrary_command(env):
     threads = 10
     clients = 5
     key_minimum = 1
-    key_maximum = 10
+    key_maximum = 50
     benchmark_specs = {"name": env.testName, "args": ['--command=SET __key__ __data__', '--command-key-pattern=P',
                                                       '--key-minimum={}'.format(key_minimum),
                                                       '--key-maximum={}'.format(key_maximum)]}
@@ -151,10 +147,6 @@ def test_key_pattern_parallel_small_key_range_arbitrary_command(env):
     # benchmark.run() returns True if the return code of memtier_benchmark was 0
     memtier_ok = benchmark.run()
     debugPrintMemtierOnError(config, env, memtier_ok)
-    with open('{0}/mb.json'.format(config.results_dir)) as mn_json:
-        memtier_json_output = json.load(mn_json)
-        assert_ParallelKeyspaceDistribution_RoundRobin(clients, env, key_minimum, key_range_size, memtier_json_output,
-                                                       threads)
 
     master_nodes_connections = env.getOSSMasterNodesConnectionList()
     merged_command_stats = {'cmdstat_set': {'calls': 0}, 'cmdstat_get': {'calls': 0}}
