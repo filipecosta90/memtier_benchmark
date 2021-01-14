@@ -30,11 +30,12 @@
 #include "protocol.h"
 #include "memtier_benchmark.h"
 #include "libmemcached_protocol/binary.h"
+
 /////////////////////////////////////////////////////////////////////////
 
 abstract_protocol::abstract_protocol() :
     m_read_buf(NULL), m_write_buf(NULL), m_keep_value(false)
-{    
+{
 }
 
 abstract_protocol::~abstract_protocol()
@@ -108,7 +109,7 @@ void protocol_response::set_total_len(unsigned int total_len)
 }
 
 unsigned int protocol_response::get_total_len(void)
-{    
+{
     return m_total_len;
 }
 
@@ -157,14 +158,14 @@ class redis_protocol : public abstract_protocol {
 protected:
     enum response_state { rs_initial, rs_read_bulk, rs_read_line, rs_end_bulk };
     response_state m_response_state;
-    unsigned int m_bulk_len;
+    long m_bulk_len;
     size_t m_response_len;
 
     unsigned int m_total_bulks_count;
     mbulk_size_el* m_current_mbulk;
 
 public:
-    redis_protocol() : m_response_state(rs_initial), m_bulk_len(0), m_response_len(0) { }
+    redis_protocol() : m_response_state(rs_initial), m_bulk_len(0), m_response_len(0), m_total_bulks_count(0), m_current_mbulk(NULL) { }
     virtual redis_protocol* clone(void) { return new redis_protocol(); }
     virtual int select_db(int db);
     virtual int authenticate(const char *credentials);
@@ -202,13 +203,53 @@ int redis_protocol::authenticate(const char *credentials)
     int size = 0;
     assert(credentials != NULL);
 
-    size = evbuffer_add_printf(m_write_buf,
-        "*2\r\n"
-        "$4\r\n"
-        "AUTH\r\n"
-        "$%u\r\n"
-        "%s\r\n",
-        (unsigned int)strlen(credentials), credentials);
+    /* Credentials may be one of:
+     * <PASSWORD>           For Redis <6.0 simple AUTH commands.
+     * <USER>:<PASSWORD>    For Redis 6.0+ AUTH with both username and password.
+     *
+     * A :<PASSWORD> will be handled as a special case of quoting a password that
+     * contains a colon.
+     */
+
+    const char *user = NULL;
+    const char *password;
+
+    if (credentials[0] == ':') {
+        password = credentials + 1;
+    } else {
+        password = strchr(credentials, ':');
+        if (!password) {
+            password = credentials;
+        } else {
+            user = credentials;
+            password++;
+        }
+    }
+
+    if (!user) {
+        size = evbuffer_add_printf(m_write_buf,
+            "*2\r\n"
+            "$4\r\n"
+            "AUTH\r\n"
+            "$%zu\r\n"
+            "%s\r\n",
+            strlen(password), password);
+    } else {
+        size_t user_len = password - user - 1;
+        size = evbuffer_add_printf(m_write_buf,
+            "*3\r\n"
+            "$4\r\n"
+            "AUTH\r\n"
+            "$%zu\r\n"
+            "%.*s\r\n"
+            "$%zu\r\n"
+            "%s\r\n",
+            user_len,
+            (int) user_len,
+            user,
+            strlen(password),
+            password);
+    }
     return size;
 }
 
@@ -265,7 +306,7 @@ int redis_protocol::write_command_set(const char *key, int key_len, const char *
     } else {
         char expiry_str[30];
         snprintf(expiry_str, sizeof(expiry_str)-1, "%u", expiry);
-        
+
         size = evbuffer_add_printf(m_write_buf,
             "*4\r\n"
             "$5\r\n"
@@ -297,7 +338,7 @@ int redis_protocol::write_command_get(const char *key, int key_len, unsigned int
     assert(key != NULL);
     assert(key_len > 0);
     int size = 0;
-    
+
     if (!offset) {
         size = evbuffer_add_printf(m_write_buf,
             "*2\r\n"
@@ -305,7 +346,7 @@ int redis_protocol::write_command_get(const char *key, int key_len, unsigned int
             "GET\r\n"
             "$%u\r\n", key_len);
         evbuffer_add(m_write_buf, key, key_len);
-        evbuffer_add(m_write_buf, "\r\n", 2);        
+        evbuffer_add(m_write_buf, "\r\n", 2);
         size += key_len + 2;
     } else {
         char offset_str[30];
@@ -323,7 +364,7 @@ int redis_protocol::write_command_get(const char *key, int key_len, unsigned int
             "$%u\r\n"
             "%s\r\n"
             "$2\r\n"
-            "-1\r\n", (unsigned int) strlen(offset_str), offset_str);        
+            "-1\r\n", (unsigned int) strlen(offset_str), offset_str);
     }
 
     return size;
@@ -431,14 +472,16 @@ int redis_protocol::parse_response(void)
                         m_total_bulks_count++;
                     }
 
-                    int len = strtol(line + 1, NULL, 10);
+                    m_bulk_len = strtol(line + 1, NULL, 10);
                     m_last_response.set_status(line);
 
-                    if (len <= 0) {
-                        m_bulk_len = 0;
+                    /*
+                     * only on negative bulk, the data ends right after the first CRLF ($-1\r\n), so
+                     * we skip on rs_read_bulk and jump into rs_end_bulk
+                     */
+                    if (m_bulk_len < 0) {
                         m_response_state = rs_end_bulk;
                     } else {
-                        m_bulk_len = (unsigned int) len;
                         m_response_state = rs_read_bulk;
                     }
                 } else if (line[0] == '+' || line[0] == '-' || line[0] == ':') {
@@ -479,9 +522,20 @@ int redis_protocol::parse_response(void)
                 }
                 break;
             case rs_read_bulk:
-                if (evbuffer_get_length(m_read_buf) >= m_bulk_len + 2) {
+                if (evbuffer_get_length(m_read_buf) >= (unsigned long)(m_bulk_len + 2)) {
                     m_response_len += m_bulk_len + 2;
-                    m_last_response.incr_hits();
+
+                    /*
+                     * KNOWN ISSUE:
+                     * in case of key with zero size (SET X "") that will return $0,
+                     * we are not counting it as "hit", and the report will be wrong.
+                     * currently this is a limitation because GETRANGE returns $0 for
+                     * such key as well as non existing key or existing key without data
+                     * in the requested range
+                     */
+                    if (m_bulk_len > 0) {
+                        m_last_response.incr_hits();
+                    }
 
                     m_response_state = rs_end_bulk;
                 } else {
@@ -497,14 +551,17 @@ int redis_protocol::parse_response(void)
                      * otherwise we insert it to the current mbulk element
                      */
                     char *bulk_value = NULL;
+                    int ret;
                     if (m_bulk_len > 0) {
                         bulk_value = (char *) malloc(m_bulk_len);
                         assert(bulk_value != NULL);
 
-                        int ret = evbuffer_remove(m_read_buf, bulk_value, m_bulk_len);
+                        ret = evbuffer_remove(m_read_buf, bulk_value, m_bulk_len);
                         assert(ret != -1);
+                    }
 
-                        // drain CRLF
+                    // drain last CRLF, zero bulk also includes it ($0\r\n\r\n)
+                    if (m_bulk_len >= 0) {
                         ret = evbuffer_drain(m_read_buf, 2);
                         assert(ret != -1);
                     }
@@ -513,17 +570,19 @@ int redis_protocol::parse_response(void)
                     if (m_current_mbulk) {
                         bulk_el* new_bulk = new bulk_el();
                         new_bulk->value = bulk_value;
-                        new_bulk->value_len = m_bulk_len;
+                        // negative bulk len counted as empty bulk
+                        new_bulk->value_len = m_bulk_len > 0 ? m_bulk_len : 0;
 
                         // insert it to current mbulk
                         m_current_mbulk->add_new_element(new_bulk);
                         m_current_mbulk = m_current_mbulk->get_next_mbulk();
                     } else {
-                        m_last_response.set_value(bulk_value, m_bulk_len);
+                        // negative bulk len counted as empty bulk
+                        m_last_response.set_value(bulk_value, m_bulk_len > 0 ? m_bulk_len : 0);
                     }
                 } else {
                     // just drain the buffer, include the CRLF
-                    if (m_bulk_len > 0) {
+                    if (m_bulk_len >= 0) {
                         int ret = evbuffer_drain(m_read_buf, m_bulk_len + 2);
                         assert(ret != -1);
                     }
@@ -569,6 +628,7 @@ bool redis_protocol::format_arbitrary_command(arbitrary_command &cmd) {
     for (unsigned int i = 0; i < cmd.command_args.size(); i++) {
         command_arg* current_arg = &cmd.command_args[i];
         current_arg->type = const_type;
+
         // check arg type
         if (current_arg->data.find(KEY_PLACEHOLDER) != std::string::npos) {
             current_arg->type = key_type;
@@ -577,6 +637,7 @@ bool redis_protocol::format_arbitrary_command(arbitrary_command &cmd) {
                 benchmark_error_log("error: data placeholder can't combined with other data\n");
                 return false;
             }
+
             current_arg->type = data_type;
         }
 
@@ -651,7 +712,7 @@ int memcache_text_protocol::write_command_set(const char *key, int key_len, cons
     assert(value != NULL);
     assert(value_len > 0);
     int size = 0;
-    
+
     size = evbuffer_add_printf(m_write_buf,
         "set %.*s 0 %u %u\r\n", key_len, key, expiry, value_len);
     evbuffer_add(m_write_buf, value, value_len);
@@ -683,18 +744,18 @@ int memcache_text_protocol::write_command_multi_get(const keylist *keylist)
     n = evbuffer_add(m_write_buf, "get", 3);
     assert(n != -1);
     size = 3;
-    
+
     for (unsigned int i = 0; i < keylist->get_keys_count(); i++) {
         const char *key;
         unsigned int key_len;
-        
+
         n = evbuffer_add(m_write_buf, " ", 1);
         assert(n != -1);
         size++;
 
         key = keylist->get_key(i, &key_len);
         assert(key != NULL);
-        
+
         n = evbuffer_add(m_write_buf, key, key_len);
         assert(n != -1);
         size += key_len;
@@ -717,15 +778,15 @@ int memcache_text_protocol::parse_response(void)
 {
     char *line;
     size_t tmplen;
-    
+
     while (true) {
         switch (m_response_state) {
             case rs_initial:
                 m_last_response.clear();
                 m_response_state = rs_read_section;
                 m_response_len = 0;
-                break;                
-                
+                break;
+
             case rs_read_section:
                 line = evbuffer_readln(m_read_buf, &tmplen, EVBUFFER_EOL_CRLF_STRICT);
                 if (!line)
@@ -735,8 +796,8 @@ int memcache_text_protocol::parse_response(void)
                 if (m_last_response.get_status() == NULL) {
                     m_last_response.set_status(line);
                 }
-                m_last_response.set_total_len((unsigned int) m_response_len);   // for now...                    
-                
+                m_last_response.set_total_len((unsigned int) m_response_len);   // for now...
+
                 if (memcmp(line, "VALUE", 5) == 0) {
                     char prefix[50];
                     char key[256];
@@ -765,13 +826,13 @@ int memcache_text_protocol::parse_response(void)
                     return -1;
                 }
                 break;
-                
-            case rs_read_value:                
+
+            case rs_read_value:
                 if (evbuffer_get_length(m_read_buf) >= m_value_len + 2) {
                     if (m_keep_value) {
                         char *value = (char *) malloc(m_value_len);
                         assert(value != NULL);
-                            
+
                         int ret = evbuffer_remove(m_read_buf, value, m_value_len);
                         assert((unsigned int) ret == 0);
 
@@ -794,7 +855,7 @@ int memcache_text_protocol::parse_response(void)
             case rs_read_end:
                 m_response_state = rs_initial;
                 return 1;
-                
+
             default:
                 benchmark_debug_log("unknown response state %d.\n", m_response_state);
                 return -1;
@@ -869,7 +930,7 @@ int memcache_binary_protocol::authenticate(const char *credentials)
     user_len = colon - user;
     passwd = colon + 1;
     passwd_len = strlen(passwd);
-    
+
     memset(&req, 0, sizeof(req));
     req.message.header.request.magic = PROTOCOL_BINARY_REQ;
     req.message.header.request.opcode = PROTOCOL_BINARY_CMD_SASL_AUTH;
@@ -993,7 +1054,7 @@ int memcache_binary_protocol::parse_response(void)
     while (true) {
         int ret;
         int status;
-        
+
         switch (m_response_state) {
             case rs_initial:
                 if (evbuffer_get_length(m_read_buf) < sizeof(m_response_hdr))
@@ -1022,21 +1083,21 @@ int memcache_binary_protocol::parse_response(void)
                     status == PROTOCOL_BINARY_RESPONSE_EBUSY) {
                     m_last_response.set_error(true);
                 }
-                
+
                 if (ntohl(m_response_hdr.message.header.response.bodylen) > 0) {
                     m_response_hdr.message.header.response.bodylen = ntohl(m_response_hdr.message.header.response.bodylen);
                     m_response_hdr.message.header.response.keylen = ntohs(m_response_hdr.message.header.response.keylen);
-                    
+
                     m_response_state = rs_read_body;
                     continue;
                 }
 
-                return 1;                
+                return 1;
                 break;
             case rs_read_body:
                 if (evbuffer_get_length(m_read_buf) >= m_response_hdr.message.header.response.bodylen) {
                     // get rid of extras and key, we don't care about them
-                    ret = evbuffer_drain(m_read_buf, 
+                    ret = evbuffer_drain(m_read_buf,
                         m_response_hdr.message.header.response.extlen +
                         m_response_hdr.message.header.response.keylen);
                     assert((unsigned int) ret == 0);
@@ -1056,7 +1117,7 @@ int memcache_binary_protocol::parse_response(void)
 
                     if (m_response_hdr.message.header.response.status == PROTOCOL_BINARY_RESPONSE_SUCCESS)
                         m_last_response.incr_hits();
-                    
+
                     m_response_len += m_response_hdr.message.header.response.bodylen;
                     m_response_state = rs_initial;
 
@@ -1121,8 +1182,8 @@ keylist::keylist(unsigned int max_keys) :
     assert(m_buffer != NULL);
     memset(m_buffer, 0, m_buffer_size);
 
-    m_buffer_ptr = m_buffer;    
-}        
+    m_buffer_ptr = m_buffer;
+}
 
 keylist::~keylist()
 {

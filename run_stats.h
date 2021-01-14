@@ -97,12 +97,14 @@ protected:
     totals m_totals;
 
     std::vector<one_second_stats> m_stats;
+
+    // current second stats ( appended to m_stats and reset every second )
     one_second_stats m_cur_stats;
 
-    struct hdr_histogram* m_get_latency_histogram;
-    struct hdr_histogram* m_set_latency_histogram;
-    struct hdr_histogram* m_wait_latency_histogram;
-    std::vector<struct hdr_histogram*> m_ar_commands_latency_histograms;
+    safe_hdr_histogram m_get_latency_histogram;
+    safe_hdr_histogram m_set_latency_histogram;
+    safe_hdr_histogram m_wait_latency_histogram;
+    std::vector<safe_hdr_histogram> m_ar_commands_latency_histograms;
 
     void roll_cur_stats(struct timeval* ts);
 
@@ -128,6 +130,12 @@ public:
     void aggregate_average(const std::vector<run_stats>& all_stats);
     void summarize(totals& result) const;
     void merge(const run_stats& other, int iteration);
+    std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_get();
+    std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_set();
+    std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_wait();
+    std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_totals();
+    std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_arbitrary_command( unsigned int pos );
+    std::vector<unsigned int> get_one_sec_cmd_stats_timestamp();
     void save_csv_one_sec(FILE *f,
                           unsigned long int& total_get_ops,
                           unsigned long int& total_set_ops,
@@ -159,7 +167,7 @@ public:
     void print_avg_latency_column(output_table &table);
     void print_quantile_latency_column(output_table &table, double quantile, char* label);
     void print_kb_sec_column(output_table &table);
-    void print_json(json_handler *jsonhandler, arbitrary_command_list& command_list, bool cluster_mode);
+    void print_json(json_handler *jsonhandler, arbitrary_command_list& command_list, bool cluster_mode, std::vector<float> quantile_list);
     void print_histogram(FILE *out, json_handler* jsonhandler, arbitrary_command_list& command_list);
     void print(FILE *file, benchmark_config *config,
                const char* header = NULL, json_handler* jsonhandler = NULL);

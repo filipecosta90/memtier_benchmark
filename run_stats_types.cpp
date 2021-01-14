@@ -16,9 +16,25 @@
  * along with memtier_benchmark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <stdio.h>
 
 #include "run_stats_types.h"
+
+
+
+one_sec_cmd_stats::one_sec_cmd_stats() :
+    m_bytes(0),
+    m_ops(0),
+    m_hits(0),
+    m_misses(0),
+    m_moved(0),
+    m_ask(0),
+    m_total_latency(0) {
+}
 
 
 void one_sec_cmd_stats::reset() {
@@ -29,6 +45,7 @@ void one_sec_cmd_stats::reset() {
     m_moved = 0;
     m_ask = 0;
     m_total_latency = 0;
+    hdr_reset(latency_histogram); 
 }
 
 void one_sec_cmd_stats::merge(const one_sec_cmd_stats& other) {
@@ -39,12 +56,14 @@ void one_sec_cmd_stats::merge(const one_sec_cmd_stats& other) {
     m_moved += other.m_moved;
     m_ask += other.m_ask;
     m_total_latency += other.m_total_latency;
+    hdr_add(latency_histogram,other.latency_histogram);
 }
 
 void one_sec_cmd_stats::update_op(unsigned int bytes, unsigned int latency) {
     m_bytes += bytes;
     m_ops++;
     m_total_latency += latency;
+    hdr_record_value(latency_histogram,latency);
 }
 
 void one_sec_cmd_stats::update_op(unsigned int bytes, unsigned int latency,
@@ -115,7 +134,13 @@ size_t ar_one_sec_cmd_stats::size() const {
 
 ///////////////////////////////////////////////////////////////////////////
 
-one_second_stats::one_second_stats(unsigned int second) {
+
+one_second_stats::one_second_stats(unsigned int second) :
+        m_set_cmd(),
+        m_get_cmd(),
+        m_wait_cmd(),
+        m_ar_commands()
+        {
     reset(second);
 }
 
@@ -245,10 +270,14 @@ void totals::add(const totals& other) {
     m_latency += other.m_latency;
     m_bytes += other.m_bytes;
     m_ops += other.m_ops;
+
+    // aggregate latency data
+    hdr_add(latency_histogram,other.latency_histogram);
 }
 
-void totals::update_op(unsigned long int bytes, double latency) {
+void totals::update_op(unsigned long int bytes, unsigned int latency) {
     m_bytes += bytes;
     m_ops++;
     m_latency += latency;
+    hdr_record_value(latency_histogram,latency);
 }

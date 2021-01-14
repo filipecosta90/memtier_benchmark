@@ -77,15 +77,22 @@ On Ubuntu/Debian distributions, simply install all prerequisites as follows:
 
 #### macOS
 
-To build natively on macOS, use Homebrew to install the required dependencies::
+To build natively on macOS, use Homebrew to install the required dependencies:
 
 ```
-$ brew install autoconf automake libtool libevent pkg-config
+$ brew install autoconf automake libtool libevent pkg-config openssl@1.1
+```
+
+When running `./configure`, if it fails to find libssl it may be necessary to
+tweak the `PKG_CONFIG_PATH` environment variable:
+
+```
+PKG_CONFIG_PATH=/usr/local/opt/openssl@1.1/lib/pkgconfig ./configure
 ```
 
 ### Building and installing
 
-After downloading the source tree, use standard autoconf/automake commands::
+After downloading the source tree, use standard autoconf/automake commands:
 
 ```
 $ autoreconf -ivf
@@ -96,14 +103,35 @@ $ make install
 
 ## Using Docker
 
+Use available images on Docker Hub:
+
+```
+# latest stable release
+$ docker run --rm redislabs/memtier_benchmark:latest --help
+
+# master branch edge build
+$ docker run --rm redislabs/memtier_benchmark:edge --help
+```
+
+Or, build locally:
+
 ```
 $ docker build -t memtier_benchmark .
 $ docker run --rm memtier_benchmark --help
 ```
 
+### Using Docker Compose
+```
+$ docker-compose -f docker-compose.memcached.yml up --build
+```
+or
+```
+$ docker-compose -f docker-compose.redis.yml up --build
+```
+
 ## Using memtier_benchmark
 
-See the included manpage or run::
+See the included manpage or run:
 
 ```
 $ memtier_benchmark --help
@@ -148,10 +176,4 @@ Sample Visual Feel of the full latency spectrum using an [online formatter](http
 ![alt text][sample_visual_histogram]
 
 
-[sample_visual_histogram]: ./docs/sample_visual_histogram.png "Configure RedisInsight"
-
-
-### Sustainable Throughput
-To really understand a system behavior we also cant really solely on doing the full percentile analysis while stressing the system to it's maximum RPS. We need to be able to compare the behavior under different throughput's and/or configurations, to be able to get the best "Sustainable Throughput" - The throughput achieved while safely maintaining service levels.
-
-By default no limit is specified and memtier_benchmark will try to stress redis up to its most. To enable limiting the rate of commands per second, you should use the --rate-limit-rps option followed by the rate value. To achieve a stable load pattern, the rate of commands per second needs to be higher than the total number of connections.
+[sample_visual_histogram]: ./docs/sample_visual_histogram.png "Sample Full Latency Spectrum Histogram"

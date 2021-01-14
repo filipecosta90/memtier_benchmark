@@ -61,7 +61,6 @@ void cluster_client_read_handler(bufferevent *bev, void *ctx)
     shard_connection *sc = (shard_connection *) ctx;
     assert(sc != NULL);
     sc->process_response();
-    sc->process_subsequent_requests();
 }
 
 void cluster_client_event_handler(bufferevent *bev, short events, void *ctx)
@@ -146,12 +145,6 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
     m_pipeline = new std::queue<request *>;
     assert(m_pipeline != NULL);
 
-    if (config->rate_limit_rps > 0 ){
-        unsigned long long total_num_of_connections = config->clients * config->threads;
-        double connection_rate_limit = (double)(config->rate_limit_rps) /(double) total_num_of_connections;
-        rate_limiter = new RateLimiter();
-        rate_limiter->set_rate(1,connection_rate_limit);
-    }
 }
 
 shard_connection::~shard_connection() {
@@ -185,10 +178,6 @@ shard_connection::~shard_connection() {
         m_pipeline = NULL;
     }
 
-    if (rate_limiter != NULL) {
-        delete rate_limiter;
-        rate_limiter = NULL;
-    }
 }
 
 void shard_connection::setup_event(int sockfd) {
@@ -200,6 +189,11 @@ void shard_connection::setup_event(int sockfd) {
     if (m_config->openssl_ctx) {
         SSL *ctx = SSL_new(m_config->openssl_ctx);
         assert(ctx != NULL);
+
+        if (m_config->tls_sni) {
+          SSL_set_tlsext_host_name(ctx, m_config->tls_sni);
+        }
+
         m_bev = bufferevent_openssl_socket_new(m_event_base,
                 sockfd, ctx, BUFFEREVENT_SSL_CONNECTING, BEV_OPT_CLOSE_ON_FREE);
     } else {
@@ -276,7 +270,7 @@ int shard_connection::connect(struct connect_info* addr) {
     // call connect
     m_connection_state = conn_in_progress;
 
-    if (bufferevent_socket_connect(m_bev, 
+    if (bufferevent_socket_connect(m_bev,
                   m_unix_sockaddr ? (struct sockaddr *) m_unix_sockaddr : addr->ci_addr,
                   m_unix_sockaddr ? sizeof(struct sockaddr_un) : addr->ci_addrlen) == -1) {
         disconnect();
@@ -379,6 +373,7 @@ void shard_connection::process_response(void)
 {
     int ret;
     bool responses_handled = false;
+
     struct timeval now;
     gettimeofday(&now, NULL);
 
@@ -387,52 +382,50 @@ void shard_connection::process_response(void)
         protocol_response *r = m_protocol->get_response();
 
         request* req = pop_req();
-        if (req->m_type != rt_empty_rate_limit) {
-            switch (req->m_type){
-                case rt_auth: {
-                    if (r->is_error()) {
-                        benchmark_error_log("error: authentication failed [%s]\n", r->get_status());
-                        error = true;
-                    } else {
-                        m_authentication = auth_done;
-                        benchmark_debug_log("authentication successful.\n");
-                    }
-                    break;
-                }
-                case rt_select_db: {
-                    if (strcmp(r->get_status(), "+OK") != 0) {
-                        benchmark_error_log("database selection failed.\n");
-                        error = true;
-                    } else {
-                        benchmark_debug_log("database selection successful.\n");
-                        m_db_selection = select_done;
-                    }
-                }
-                case rt_cluster_slots: {
-                    if (r->get_mbulk_value() == NULL || r->get_mbulk_value()->mbulks_elements.size() == 0) {
-                        benchmark_error_log("cluster slot failed.\n");
-                        error = true;
-                    } else {
-                        // parse response
-                        m_conns_manager->handle_cluster_slots(r);
-                        m_protocol->set_keep_value(false);
-
-                        m_cluster_slots = slots_done;
-                        benchmark_debug_log("cluster slot command successful\n");
-                    }
-                }
-                default: {
-                    benchmark_debug_log("server %s: handled response (first line): %s, %d hits, %d misses\n",
-                                        get_readable_id(),
-                                        r->get_status(),
-                                        r->get_hits(),
-                                        req->m_keys - r->get_hits());
-
-                    m_conns_manager->handle_response(m_id, now, req, r);
-                    m_conns_manager->inc_reqs_processed();
-                    responses_handled = true;
-                }
+        switch (req->m_type)
+        {
+        case rt_auth:
+            if (r->is_error()) {
+                benchmark_error_log("error: authentication failed [%s]\n", r->get_status());
+                error = true;
+            } else {
+                m_authentication = auth_done;
+                benchmark_debug_log("authentication successful.\n");
             }
+            break;
+        case rt_select_db:
+            if (strcmp(r->get_status(), "+OK") != 0) {
+                benchmark_error_log("database selection failed.\n");
+                error = true;
+            } else {
+                benchmark_debug_log("database selection successful.\n");
+                m_db_selection = select_done;
+            }
+            break;
+        case rt_cluster_slots:
+            if (r->get_mbulk_value() == NULL || r->get_mbulk_value()->mbulks_elements.size() == 0) {
+                benchmark_error_log("cluster slot failed.\n");
+                error = true;
+            } else {
+                // parse response
+                m_conns_manager->handle_cluster_slots(r);
+                m_protocol->set_keep_value(false);
+
+                m_cluster_slots = slots_done;
+                benchmark_debug_log("cluster slot command successful\n");
+            }
+            break;
+        default:
+            benchmark_debug_log("server %s: handled response (first line): %s, %d hits, %d misses\n",
+                                get_readable_id(),
+                                r->get_status(),
+                                r->get_hits(),
+                                req->m_keys - r->get_hits());
+
+            m_conns_manager->handle_response(m_id, now, req, r);
+            m_conns_manager->inc_reqs_processed();
+            responses_handled = true;
+            break;
         }
         delete req;
         if (error) {
@@ -445,7 +438,7 @@ void shard_connection::process_response(void)
     }
 
     if (m_config->reconnect_interval > 0 && responses_handled) {
-        if ((m_conns_manager->get_reqs_processed() % m_config->reconnect_interval) == 0) {
+        if ((m_config->requests != m_conns_manager->get_reqs_processed()) && ((m_conns_manager->get_reqs_processed() % m_config->reconnect_interval) == 0)) {
             assert(m_pipeline->size() == 0);
             benchmark_debug_log("reconnecting, m_reqs_processed = %u\n", m_conns_manager->get_reqs_processed());
 
@@ -457,6 +450,20 @@ void shard_connection::process_response(void)
             return;
         }
     }
+
+    fill_pipeline();
+
+    // update events
+    if (m_bev != NULL) {
+        // no pending response (nothing to read) and output buffer empty (nothing to write)
+        if ((m_pending_resp == 0) && (evbuffer_get_length(bufferevent_get_output(m_bev)) == 0)) {
+            bufferevent_disable(m_bev, EV_WRITE|EV_READ);
+        }
+    }
+
+    if (m_conns_manager->finished()) {
+        m_conns_manager->set_end_time();
+    }
 }
 
 void shard_connection::process_first_request() {
@@ -464,42 +471,23 @@ void shard_connection::process_first_request() {
     fill_pipeline();
 }
 
-void shard_connection::process_subsequent_requests() {
-    if (m_conns_manager->finished()){
-        m_conns_manager->set_end_time();
-        benchmark_debug_log("server %s: Connection disabling buffer event\n", get_readable_id());
-        bufferevent_disable(m_bev, EV_WRITE|EV_READ);
-    }
-    else {
-        fill_pipeline();
-    }
-}
 
 void shard_connection::fill_pipeline(void)
 {
     struct timeval now;
     gettimeofday(&now, NULL);
-    bool limited = false;
-
-    if ( rate_limiter != NULL ){
-        long long quantity = m_config->pipeline - m_pipeline->size();
-        limited = !rate_limiter->can_request(quantity,now);
-    }
-
-    if(limited==false){
-        while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
-            if (!is_conn_setup_done()) {
-                send_conn_setup_commands(now);
-                return;
-            }
-            // don't exceed requests
-            if (m_conns_manager->hold_pipeline(m_id))
-                break;
-            // client manage requests logic
-            m_conns_manager->create_request(now, m_id);
+    while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
+        if (!is_conn_setup_done()) {
+            send_conn_setup_commands(now);
+            return;
         }
-    }else{
-        send_empty_rate_limit_event();
+        // don't exceed requests
+        if (m_conns_manager->hold_pipeline(m_id)) {
+            break;
+        }
+
+        // client manage requests logic
+        m_conns_manager->create_request(now, m_id);
     }
 }
 
@@ -572,22 +560,6 @@ void shard_connection::send_set_command(struct timeval* sent_time, const char *k
     push_req(new request(rt_set, cmd_size, sent_time, 1));
 }
 
-
-/*
- * empty rate limit command:
- *
- * we send the empty rate limit command so that when a client has exceed is quota
- * instead of writing new requests, it will just submit empty event to the event loop.
- * This is needed since the normal rate limit based on suspending the thread that is
- * exceeding the quota can affect the other clients on that same thread and the
- * latency of the request as well.
- * In this way we are not effecting other clients overall latency measurement.
- */
-void shard_connection::send_empty_rate_limit_event() {
-    if ( bufferevent_write(m_bev,"^\r\n",3) == 0 ){
-        push_req(new request(rt_empty_rate_limit, 3, 0, 0));
-    }
-}
 
 void shard_connection::send_get_command(struct timeval* sent_time,
                                         const char *key, int key_len, unsigned int offset) {

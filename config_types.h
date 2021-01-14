@@ -52,9 +52,7 @@ struct config_quantiles {
     config_quantiles(const char *ratio_str);
     bool is_defined(void);
     inline std::vector<float>::iterator begin()  { return quantile_list.begin(); }
-    inline std::vector<float>::const_iterator cbegin() const  { return quantile_list.cbegin(); }
     inline std::vector<float>::iterator end()  { return quantile_list.end(); }
-    inline std::vector<float>::const_iterator cend() const  { return quantile_list.cend(); }
 };
 
 struct config_weight_list {
@@ -62,7 +60,7 @@ struct config_weight_list {
         unsigned int size;
         unsigned int weight;
     };
-    
+
     std::vector<weight_item> item_list;
     std::vector<weight_item>::iterator next_size_iter;
     unsigned int next_size_weight;
@@ -71,7 +69,7 @@ struct config_weight_list {
     config_weight_list(const char* str);
     config_weight_list(const config_weight_list& copy);
     config_weight_list& operator=(const config_weight_list& rhs);
-    
+
     bool is_defined(void);
     unsigned int largest(void);
     const char *print(char *buf, int buf_len);

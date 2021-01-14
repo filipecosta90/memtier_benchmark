@@ -92,6 +92,7 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         "key = %s\n"
         "cacert = %s\n"
         "tls_skip_verify = %s\n"
+        "sni = %s\n"
 #endif
         "out_file = %s\n"
         "client_stats = %s\n"
@@ -139,6 +140,7 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         cfg->tls_key,
         cfg->tls_cacert,
         cfg->tls_skip_verify ? "yes" : "no",
+        cfg->tls_sni,
 #endif
         cfg->out_file,
         cfg->client_stats,
@@ -195,6 +197,7 @@ static void config_print_to_json(json_handler * jsonhandler, struct benchmark_co
     jsonhandler->write_obj("key"               ,"\"%s\"",      	cfg->tls_key);
     jsonhandler->write_obj("cacert"            ,"\"%s\"",      	cfg->tls_cacert);
     jsonhandler->write_obj("tls_skip_verify"   ,"\"%s\"",      	cfg->tls_skip_verify ? "true" : "false");
+    jsonhandler->write_obj("sni"               ,"\"%s\"",       cfg->tls_sni);
 #endif
     jsonhandler->write_obj("client_stats"      ,"\"%s\"",      	cfg->client_stats);
     jsonhandler->write_obj("run_count"         ,"%u",          	cfg->run_count);
@@ -273,9 +276,7 @@ static void config_init_defaults(struct benchmark_config *cfg)
     if (!cfg->requests && !cfg->test_time)
         cfg->requests = 10000;
     if (!cfg->hdr_prefix)
-        cfg->key_prefix = "";
-    if (!cfg->rate_limit_rps)
-        cfg->rate_limit_rps = 0;
+        cfg->hdr_prefix = "";
     if (!cfg->print_percentiles.is_defined())
         cfg->print_percentiles = config_quantiles("50,99,99.9");
 }
@@ -369,7 +370,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_print_percentiles,
         o_distinct_client_seed,
         o_randomize,
-        o_initial_random_seed,
         o_client_stats,
         o_reconnect_interval,
         o_generate_keys,
@@ -389,8 +389,8 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_tls_key,
         o_tls_cacert,
         o_tls_skip_verify,
-        o_hdr_file_prefix,
-        o_rate_limit_rps
+        o_tls_sni,
+        o_hdr_file_prefix
     };
 
     static struct option long_options[] = {
@@ -404,6 +404,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "key",                        1, 0, o_tls_key },
         { "cacert",                     1, 0, o_tls_cacert },
         { "tls-skip-verify",            0, 0, o_tls_skip_verify },
+        { "sni",                        1, 0, o_tls_sni },
 #endif
         { "out-file",                   1, 0, 'o' },
         { "hdr-file-prefix",            1, 0, o_hdr_file_prefix },
@@ -415,7 +416,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "print-percentiles",          1, 0, o_print_percentiles },
         { "distinct-client-seed",       0, 0, o_distinct_client_seed },
         { "randomize",                  0, 0, o_randomize },
-        { "initial-random-seed",        1, 0, o_initial_random_seed },
         { "requests",                   1, 0, 'n' },
         { "clients",                    1, 0, 'c' },
         { "threads",                    1, 0, 't' },
@@ -454,7 +454,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "command",                    1, 0, o_command },
         { "command-key-pattern",        1, 0, o_command_key_pattern },
         { "command-ratio",              1, 0, o_command_ratio },
-        { "rate-limit-rps",             1, 0, o_rate_limit_rps },
         { NULL,                         0, 0, 0 }
     };
 
@@ -462,7 +461,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
     int c;
     char *endptr;
     while ((c = getopt_long(argc, argv,
-                "s:S:p:P:o:x:DRn:c:t:d:a:h", long_options, &option_index)) != -1)
+                "vs:S:p:P:o:x:DRn:c:t:d:a:h", long_options, &option_index)) != -1)
     {
         switch (c) {
                 case 'h':
@@ -471,7 +470,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                 case 'v':
                     puts(PACKAGE_STRING);
                 // FIXME!!
-                    puts("Copyright (C) 2011-2017 Redis Labs Ltd.");
+                    puts("Copyright (C) 2011-2020 Redis Labs Ltd.");
                     puts("This is free software.  You may redistribute copies of it under the terms of");
                     puts("the GNU General Public License <http://www.gnu.org/licenses/gpl.html>.");
                     puts("There is NO WARRANTY, to the extent permitted by law.");
@@ -536,15 +535,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->distinct_client_seed++;
                     break;
                 case o_randomize:
-                    cfg->initial_random_seed = generate_random_seed();
-                    srandom(cfg->initial_random_seed);
-                    fprintf(stderr, "Using initial random seed: %d\n",cfg->initial_random_seed);
-                    cfg->randomize = random();
-                    break;
-                case o_initial_random_seed:
-                    cfg->initial_random_seed = (unsigned int) strtoul(optarg, &endptr, 10);
-                    srandom(cfg->initial_random_seed);
-                    fprintf(stderr, "Using initial random seed: %d\n",cfg->initial_random_seed);
+                    srandom(generate_random_seed());
                     cfg->randomize = random();
                     break;
                 case 'n':
@@ -822,15 +813,6 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 }
-                case o_rate_limit_rps: {
-                    endptr = NULL;
-                    cfg->rate_limit_rps = strtoull(optarg, &endptr, 10);
-                    if (cfg->rate_limit_rps < 1 || !endptr || *endptr != '\0') {
-                        fprintf(stderr, "error: rate-limit-rps must be greater than zero.\n");
-                        return -1;
-                    }
-                    break;
-                }
 #ifdef USE_TLS
                 case o_tls:
                     cfg->tls = true;
@@ -846,6 +828,9 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     break;
                 case o_tls_skip_verify:
                     cfg->tls_skip_verify = true;
+                    break;
+                case o_tls_sni:
+                    cfg->tls_sni = optarg;
                     break;
 #endif
             default:
@@ -867,105 +852,105 @@ void usage() {
             "A memcache/redis NoSQL traffic generator and performance benchmarking tool.\n"
             "\n"
             "Connection and General Options:\n"
-            "  -s, --server=ADDR                 Server address (default: localhost)\n"
-            "  -p, --port=PORT                   Server port (default: 6379)\n"
-            "  -S, --unix-socket=SOCKET          UNIX Domain socket name (default: none)\n"
-            "  -P, --protocol=PROTOCOL           Protocol to use (default: redis).  Other\n"
-            "                                    supported protocols are memcache_text,\n"
-            "                                    memcache_binary.\n"
-            "  -a, --authenticate=CREDENTIALS    Authenticate to redis using CREDENTIALS, which depending\n"
+            "  -s, --server=ADDR              Server address (default: localhost)\n"
+            "  -p, --port=PORT                Server port (default: 6379)\n"
+            "  -S, --unix-socket=SOCKET       UNIX Domain socket name (default: none)\n"
+            "  -P, --protocol=PROTOCOL        Protocol to use (default: redis).  Other\n"
+            "                                 supported protocols are memcache_text,\n"
+            "                                 memcache_binary.\n"
+            "  -a, --authenticate=CREDENTIALS Authenticate using specified credentials.\n"
+            "                                 A simple password is used for memcache_text\n"
+            "                                 and Redis <= 5.x. <USER>:<PASSWORD> can be\n"
+            "                                 specified for memcache_binary or Redis 6.x\n"
+            "                                 or newer with ACL user support.\n"
 #ifdef USE_TLS
-            "      --tls                         Enable SSL/TLS transport security\n"
-            "      --cert=FILE                   Use specified client certificate for TLS\n"
-            "      --key=FILE                    Use specified private key for TLS\n"
-            "      --cacert=FILE                 Use specified CA certs bundle for TLS\n"
-            "      --tls-skip-verify             Skip verification of server certificate\n"
+            "      --tls                      Enable SSL/TLS transport security\n"
+            "      --cert=FILE                Use specified client certificate for TLS\n"
+            "      --key=FILE                 Use specified private key for TLS\n"
+            "      --cacert=FILE              Use specified CA certs bundle for TLS\n"
+            "      --tls-skip-verify          Skip verification of server certificate\n"
+            "      --sni=STRING               Add an SNI header\n"
 #endif
-            "                                    on the protocol can be PASSWORD or USER:PASSWORD.\n"
-            "  -x, --run-count=NUMBER            Number of full-test iterations to perform\n"
-            "  -D, --debug                       Print debug output\n"
-            "      --client-stats=FILE           Produce per-client stats file\n"
-            "      --out-file=FILE               Name of output file (default: stdout)\n"
-            "      --json-out-file=FILE          Name of JSON output file, if not set, will not print to json\n"
-            "      --hdr-file-prefix=FILE        Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
-            "      --show-config                 Print detailed configuration before running\n"
-            "      --hide-histogram              Don't print detailed latency histogram\n"
-            "      --print-percentiles           Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
-            "      --cluster-mode                Run client in cluster mode\n"
-            "      --help                        Display this help\n"
-            "      --version                     Display version information\n"
+            "  -x, --run-count=NUMBER         Number of full-test iterations to perform\n"
+            "  -D, --debug                    Print debug output\n"
+            "      --client-stats=FILE        Produce per-client stats file\n"
+            "  -o, --out-file=FILE            Name of output file (default: stdout)\n"
+            "      --json-out-file=FILE       Name of JSON output file, if not set, will not print to json\n"
+            "      --hdr-file-prefix=FILE     Prefix of HDR Latency Histogram output files, if not set, will not save latency histogram files\n"
+            "      --show-config              Print detailed configuration before running\n"
+            "      --hide-histogram           Don't print detailed latency histogram\n"
+            "      --print-percentiles        Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
+            "      --cluster-mode             Run client in cluster mode\n"
+            "  -h, --help                     Display this help\n"
+            "  -v, --version                  Display version information\n"
             "\n"
             "Test Options:\n"
-            "  -n, --requests=NUMBER             Number of total requests per client (default: 10000)\n"
-            "                                    use 'allkeys' to run on the entire key-range\n"
-            "  -c, --clients=NUMBER              Number of clients per thread (default: 50)\n"
-            "  -t, --threads=NUMBER              Number of threads (default: 4)\n"
-            "      --test-time=SECS              Number of seconds to run the test\n"
-            "      --ratio=RATIO                 Set:Get ratio (default: 1:10)\n"
-            "      --pipeline=NUMBER             Number of concurrent pipelined requests (default: 1)\n"
-            "      --reconnect-interval=NUM      Number of requests after which re-connection is performed\n"
-            "      --multi-key-get=NUM           Enable multi-key get commands, up to NUM keys (default: 0)\n"
-            "      --select-db=DB                DB number to select, when testing a redis server\n"            
-            "      --randomize                   Set initial random seed based on timestamp (default is constant value of 0 )\n"
-            "      --initial-random-seed=NUMBER  Set initial random seed based on the specified number (default is constant value of 0 )\n"
-            "      --distinct-client-seed        Use a different random seed for each client, starting at the initial random specified seed value\n"
-            "      --rate-limit-rps=NUM          Limit the request rate to the specified rate per second. By default no limit is set.\n"
-            "                                    To achieve a stable load pattern, the rate of commands per second needs to be higher\n"
-            "                                    than the total number of connections. For example: --rate-limit-rps=10000.\n"
+            "  -n, --requests=NUMBER          Number of total requests per client (default: 10000)\n"
+            "                                 use 'allkeys' to run on the entire key-range\n"
+            "  -c, --clients=NUMBER           Number of clients per thread (default: 50)\n"
+            "  -t, --threads=NUMBER           Number of threads (default: 4)\n"
+            "      --test-time=SECS           Number of seconds to run the test\n"
+            "      --ratio=RATIO              Set:Get ratio (default: 1:10)\n"
+            "      --pipeline=NUMBER          Number of concurrent pipelined requests (default: 1)\n"
+            "      --reconnect-interval=NUM   Number of requests after which re-connection is performed\n"
+            "      --multi-key-get=NUM        Enable multi-key get commands, up to NUM keys (default: 0)\n"
+            "      --select-db=DB             DB number to select, when testing a redis server\n"
+            "      --distinct-client-seed     Use a different random seed for each client\n"
+            "      --randomize                random seed based on timestamp (default is constant value)\n"
             "\n"
             "Arbitrary command:\n"
-            "      --command=COMMAND             Specify a command to send in quotes.\n"
-            "                                    Each command that you specify is run with its ratio and key-pattern options.\n"
-            "                                    For example: --command=\"set __key__ 5\" --command-ratio=2 --command-key-pattern=G\n"
-            "                                    To use a generated key or object, enter:\n"
-            "                                      __key__: Use key generated from Key Options.\n"
-            "                                      __data__: Use data generated from Object Options.\n"
-            "      --command-ratio               The number of times the command is sent in sequence.(default: 1)\n"
-            "      --command-key-pattern         Key pattern for the command (default: R):\n"
-            "                                    G for Gaussian distribution.\n"
-            "                                    R for uniform Random.\n"
-            "                                    S for Sequential.\n"
-            "                                    P for Parallel (Sequential were each client has a subset of the key-range).\n"
+            "      --command=COMMAND          Specify a command to send in quotes.\n"
+            "                                 Each command that you specify is run with its ratio and key-pattern options.\n"
+            "                                 For example: --command=\"set __key__ 5\" --command-ratio=2 --command-key-pattern=G\n"
+            "                                 To use a generated key or object, enter:\n"
+            "                                   __key__: Use key generated from Key Options.\n"
+            "                                   __data__: Use data generated from Object Options.\n"
+            "      --command-ratio            The number of times the command is sent in sequence.(default: 1)\n"
+            "      --command-key-pattern      Key pattern for the command (default: R):\n"
+            "                                 G for Gaussian distribution.\n"
+            "                                 R for uniform Random.\n"
+            "                                 S for Sequential.\n"
+            "                                 P for Parallel (Sequential were each client has a subset of the key-range).\n"
             "\n"
             "Object Options:\n"
-            "  -d  --data-size=SIZE              Object data size (default: 32)\n"
-            "      --data-offset=OFFSET          Actual size of value will be data-size + data-offset\n"
-            "                                    Will use SETRANGE / GETRANGE (default: 0)\n"
-            "  -R  --random-data                 Indicate that data should be randomized\n"
-            "      --data-size-range=RANGE       Use random-sized items in the specified range (min-max)\n"
-            "      --data-size-list=LIST         Use sizes from weight list (size1:weight1,..sizeN:weightN)\n"
-            "      --data-size-pattern=R|S       Use together with data-size-range\n"
-            "                                    when set to R, a random size from the defined data sizes will be used,\n"
-            "                                    when set to S, the defined data sizes will be evenly distributed across\n"
-            "                                    the key range, see --key-maximum (default R)\n"
-            "      --expiry-range=RANGE          Use random expiry values from the specified range\n"
+            "  -d  --data-size=SIZE           Object data size (default: 32)\n"
+            "      --data-offset=OFFSET       Actual size of value will be data-size + data-offset\n"
+            "                                 Will use SETRANGE / GETRANGE (default: 0)\n"
+            "  -R  --random-data              Indicate that data should be randomized\n"
+            "      --data-size-range=RANGE    Use random-sized items in the specified range (min-max)\n"
+            "      --data-size-list=LIST      Use sizes from weight list (size1:weight1,..sizeN:weightN)\n"
+            "      --data-size-pattern=R|S    Use together with data-size-range\n"
+            "                                 when set to R, a random size from the defined data sizes will be used,\n"
+            "                                 when set to S, the defined data sizes will be evenly distributed across\n"
+            "                                 the key range, see --key-maximum (default R)\n"
+            "      --expiry-range=RANGE       Use random expiry values from the specified range\n"
             "\n"
             "Imported Data Options:\n"
-            "      --data-import=FILE            Read object data from file\n"
-            "      --data-verify                 Enable data verification when test is complete\n"
-            "      --verify-only                 Only perform --data-verify, without any other test\n"
-            "      --generate-keys               Generate keys for imported objects\n"
-            "      --no-expiry                   Ignore expiry information in imported data\n"
+            "      --data-import=FILE         Read object data from file\n"
+            "      --data-verify              Enable data verification when test is complete\n"
+            "      --verify-only              Only perform --data-verify, without any other test\n"
+            "      --generate-keys            Generate keys for imported objects\n"
+            "      --no-expiry                Ignore expiry information in imported data\n"
             "\n"
             "Key Options:\n"
-            "      --key-prefix=PREFIX           Prefix for keys (default: \"memtier-\")\n"
-            "      --key-minimum=NUMBER          Key ID minimum value (default: 0)\n"
-            "      --key-maximum=NUMBER          Key ID maximum value (default: 10000000)\n"
-            "      --key-pattern=PATTERN         Set:Get pattern (default: R:R)\n"
-            "                                    G for Gaussian distribution.\n"
-            "                                    R for uniform Random.\n"
-            "                                    S for Sequential.\n"
-            "                                    P for Parallel (Sequential were each client has a subset of the key-range).\n"
-            "      --key-stddev                  The standard deviation used in the Gaussian distribution\n"
-            "                                    (default is key range / 6)\n"
-            "      --key-median                  The median point used in the Gaussian distribution\n"
-            "                                    (default is the center of the key range)\n"
+            "      --key-prefix=PREFIX        Prefix for keys (default: \"memtier-\")\n"
+            "      --key-minimum=NUMBER       Key ID minimum value (default: 0)\n"
+            "      --key-maximum=NUMBER       Key ID maximum value (default: 10000000)\n"
+            "      --key-pattern=PATTERN      Set:Get pattern (default: R:R)\n"
+            "                                 G for Gaussian distribution.\n"
+            "                                 R for uniform Random.\n"
+            "                                 S for Sequential.\n"
+            "                                 P for Parallel (Sequential were each client has a subset of the key-range).\n"
+            "      --key-stddev               The standard deviation used in the Gaussian distribution\n"
+            "                                 (default is key range / 6)\n"
+            "      --key-median               The median point used in the Gaussian distribution\n"
+            "                                 (default is the center of the key range)\n"
             "\n"
             "WAIT Options:\n"
-            "      --wait-ratio=RATIO            Set:Wait ratio (default is no WAIT commands - 1:0)\n"
-            "      --num-slaves=RANGE            WAIT for a random number of slaves in the specified range\n"
-            "      --wait-timeout=RANGE          WAIT for a random number of milliseconds in the specified range (normal \n"
-            "                                    distribution with the center in the middle of the range)"
+            "      --wait-ratio=RATIO         Set:Wait ratio (default is no WAIT commands - 1:0)\n"
+            "      --num-slaves=RANGE         WAIT for a random number of slaves in the specified range\n"
+            "      --wait-timeout=RANGE       WAIT for a random number of milliseconds in the specified range (normal \n"
+            "                                 distribution with the center in the middle of the range)"
             "\n"
             );
 
@@ -1063,13 +1048,6 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
             exit(1);
         }
         threads.push_back(t);
-    }
-
-    // if user configure arbitrary commands, we use one of the thread's protocol to format and prepare it
-    for (unsigned int i=0; i<cfg->arbitrary_commands->size(); i++) {
-        if (!threads.front()->m_protocol->format_arbitrary_command(cfg->arbitrary_commands->at(i))) {
-            exit(1);
-        }
     }
 
     // launch threads
@@ -1180,6 +1158,55 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 }
 
 #ifdef USE_TLS
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+static pthread_mutex_t *__openssl_locks;
+
+static void __openssl_locking_callback(int mode, int type, const char *file, int line)
+{
+    if (mode & CRYPTO_LOCK) {
+        pthread_mutex_lock(&(__openssl_locks[type]));
+    } else {
+        pthread_mutex_unlock(&(__openssl_locks[type]));
+    }
+}
+
+static unsigned long __openssl_thread_id(void)
+{
+    unsigned long id;
+
+    id = (unsigned long) pthread_self();
+    return id;
+}
+#pragma GCC diagnostic pop
+
+static void init_openssl_threads(void)
+{
+    int i;
+
+    __openssl_locks = (pthread_mutex_t *) malloc(CRYPTO_num_locks() * sizeof(pthread_mutex_t));
+    assert(__openssl_locks != NULL);
+
+    for (i = 0; i < CRYPTO_num_locks(); i++) {
+        pthread_mutex_init(&(__openssl_locks[i]), NULL);
+    }
+
+    CRYPTO_set_id_callback(__openssl_thread_id);
+    CRYPTO_set_locking_callback(__openssl_locking_callback);
+}
+
+static void cleanup_openssl_threads(void)
+{
+    int i;
+
+    CRYPTO_set_locking_callback(NULL);
+    for (i = 0; i < CRYPTO_num_locks(); i++) {
+        pthread_mutex_destroy(&(__openssl_locks[i]));
+    }
+    OPENSSL_free(__openssl_locks);
+}
+
 static void init_openssl(void)
 {
     SSL_library_init();
@@ -1188,14 +1215,20 @@ static void init_openssl(void)
         fprintf(stderr, "Failed to initialize OpenSSL random entropy.\n");
         exit(1);
     }
+
+    init_openssl_threads();
 }
+
+static void cleanup_openssl(void)
+{
+    cleanup_openssl_threads();
+}
+
 #endif
 
 int main(int argc, char *argv[])
 {
-    struct benchmark_config cfg;
-
-    memset(&cfg, 0, sizeof(struct benchmark_config));
+    benchmark_config cfg = benchmark_config();
     cfg.arbitrary_commands = new arbitrary_command_list();
 
     if (config_parse_args(argc, argv, &cfg) < 0) {
@@ -1203,22 +1236,25 @@ int main(int argc, char *argv[])
     }
 
     config_init_defaults(&cfg);
-    // We need this here since the defaults might change the calculations
-    // The rate of commands per second needs to be higher than the total number of connections
-    if ( ( cfg.rate_limit_rps > 0 ) && ( cfg.rate_limit_rps < cfg.clients*cfg.threads) ) {
-        benchmark_error_log("error: rate-limit-rps value (%llu) must be higher than the expected established connections (%d).\n",
-                cfg.rate_limit_rps,
-                cfg.clients*cfg.threads
-                );
-        exit(1);
-    }
-
     log_level = cfg.debug;
     if (cfg.show_config) {
         fprintf(stderr, "============== Configuration values: ==============\n");
         config_print(stdout, &cfg);
         fprintf(stderr, "===================================================\n");
     }
+
+    // if user configure arbitrary commands, format and prepare it
+    for (unsigned int i=0; i<cfg.arbitrary_commands->size(); i++) {
+        abstract_protocol* tmp_protocol = protocol_factory(cfg.protocol);
+        assert(tmp_protocol != NULL);
+
+        if (!tmp_protocol->format_arbitrary_command(cfg.arbitrary_commands->at(i))) {
+            exit(1);
+        }
+
+        delete tmp_protocol;
+    }
+
 
 #ifdef USE_TLS
     // Initialize OpenSSL only if we're really going to use it.
@@ -1457,7 +1493,6 @@ int main(int argc, char *argv[])
             stats.save_hdr_get_command( &cfg,run_id );
             stats.save_hdr_set_command( &cfg,run_id );
             stats.save_hdr_arbitrary_commands( &cfg,run_id );
-
         }
         //
         // Print some run information
@@ -1475,7 +1510,7 @@ int main(int argc, char *argv[])
             jsonhandler->write_obj("Connections per thread","%u",cfg.clients);
             jsonhandler->write_obj(cfg.requests > 0 ? "Requests per client"  : "Seconds","%llu",
                                    cfg.requests > 0 ? cfg.requests : (unsigned long long)cfg.test_time);
-
+            jsonhandler->write_obj("Format version","%d",2);
             jsonhandler->close_nesting();
         }
 
@@ -1567,9 +1602,13 @@ int main(int argc, char *argv[])
     }
 
 #ifdef USE_TLS
-    if (cfg.openssl_ctx) {
-        SSL_CTX_free(cfg.openssl_ctx);
-        cfg.openssl_ctx = NULL;
+    if(cfg.tls) {
+        if (cfg.openssl_ctx) {
+            SSL_CTX_free(cfg.openssl_ctx);
+            cfg.openssl_ctx = NULL;
+        }
+
+        cleanup_openssl();
     }
 #endif
 }

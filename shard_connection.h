@@ -29,7 +29,6 @@
 #include <event2/bufferevent.h>
 
 #include "protocol.h"
-#include "rate_limiter.h"
 
 // forward decleration
 class connections_manager;
@@ -43,7 +42,7 @@ enum authentication_state { auth_none, auth_sent, auth_done };
 enum select_db_state { select_none, select_sent, select_done };
 enum cluster_slots_state { slots_none, slots_sent, slots_done };
 
-enum request_type { rt_unknown, rt_set, rt_get, rt_wait, rt_arbitrary, rt_auth, rt_select_db, rt_cluster_slots, rt_empty_rate_limit };
+enum request_type { rt_unknown, rt_set, rt_get, rt_wait, rt_arbitrary, rt_auth, rt_select_db, rt_cluster_slots };
 struct request {
     request_type m_type;
     struct timeval m_sent_time;
@@ -106,7 +105,6 @@ public:
     int send_arbitrary_command(const command_arg *arg);
     int send_arbitrary_command(const command_arg *arg, const char *val, int val_len);
     void send_arbitrary_command_end(size_t command_index, struct timeval* sent_time, int cmd_size);
-    void send_empty_rate_limit_event();
 
     void set_authentication() {
         m_authentication = auth_none;
@@ -185,7 +183,6 @@ private:
     enum select_db_state m_db_selection;
     enum cluster_slots_state m_cluster_slots;
 
-    RateLimiter *rate_limiter;           // used to rate limit
 };
 
 #endif //MEMTIER_BENCHMARK_SHARD_CONNECTION_H

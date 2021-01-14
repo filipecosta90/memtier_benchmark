@@ -85,7 +85,7 @@ config_ratio::config_ratio(const char *ratio_str) :
     if (!q || *q != '\0') {
         a = b = 0;
         return;
-    }    
+    }
 }
 
 config_quantiles::config_quantiles(){
@@ -127,7 +127,7 @@ config_weight_list::config_weight_list(const config_weight_list& copy) :
     for (std::vector<weight_item>::const_iterator i = copy.item_list.begin(); i != copy.item_list.end(); i++) {
         const weight_item wi = *i;
         item_list.push_back(wi);
-    }    
+    }
     next_size_iter = item_list.begin();
 }
 
@@ -140,7 +140,7 @@ config_weight_list& config_weight_list::operator=(const config_weight_list& rhs)
     for (std::vector<weight_item>::const_iterator i = rhs.item_list.begin(); i != rhs.item_list.end(); i++) {
         const weight_item wi = *i;
         item_list.push_back(wi);
-    }    
+    }
     next_size_iter = item_list.begin();
     return *this;
 }
@@ -213,7 +213,7 @@ const char* config_weight_list::print(char *buf, int buf_len)
 
     *buf = '\0';
     for (std::vector<weight_item>::iterator i = item_list.begin(); i != item_list.end(); i++) {
-        int n = snprintf(buf, buf_len, "%s%u:%u", 
+        int n = snprintf(buf, buf_len, "%s%u:%u",
                 i != item_list.begin() ? "," : "", i->size, i->weight);
         buf += n;
         buf_len -= n;
