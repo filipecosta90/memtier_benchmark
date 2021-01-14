@@ -51,6 +51,7 @@ jobs:
         cd ..
 
     - name: Test OSS TCP
+      timeout-minutes: 2
       run: |
         cd tests 
         MEMTIER_BINARY=./../memtier_benchmark \
@@ -60,6 +61,7 @@ jobs:
         cd ..
 
     - name: Test OSS TCP TLS
+      timeout-minutes: 2
       if: matrix.platform == 'ubuntu-latest'
       run: |
         cd tests
@@ -77,6 +79,7 @@ jobs:
         cd ..
 
     - name: Test OSS-CLUSTER TCP
+      timeout-minutes: 2
       run: |
         cd tests 
         MEMTIER_BINARY=./../memtier_benchmark \
@@ -86,6 +89,7 @@ jobs:
         cd ..
 
     - name: Test OSS-CLUSTER TCP TLS
+      timeout-minutes: 2
       if: matrix.platform == 'ubuntu-latest'
       run: |
         cd tests
