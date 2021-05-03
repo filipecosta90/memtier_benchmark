@@ -28,4 +28,5 @@ stamp-h1
 # memtier outputs
 *.hgrm
 *.txt
+!/tests/test_requirements.txt
 __pycache__
