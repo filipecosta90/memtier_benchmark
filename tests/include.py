@@ -106,3 +106,51 @@ def ensure_clean_benchmark_folder(dirname):
     if os.path.exists(dirname):
         os.removedirs(dirname)
     os.makedirs(dirname)
+
+def assert_SequentialKeyspaceDistribution(clients, env, key_maximum, key_minimum, memtier_json_output, threads):
+    keyspace_distribution = memtier_json_output["Client keyspace distribution"]
+    for thread_id in range(1, threads + 1):
+        thread_keyspace_distribution = keyspace_distribution["thread-{}".format(thread_id)]
+        for client_id in range(1, clients + 1):
+            client_keyspace_distribution = thread_keyspace_distribution["client-{}".format(client_id)]
+            key_min = client_keyspace_distribution["key_min"]
+            key_max = client_keyspace_distribution["key_max"]
+            env.assertEqual(key_min, key_minimum)
+            env.assertEqual(key_max, key_maximum)
+
+
+def assert_ParallelKeyspaceDistribution(clients, env, key_maximum, key_minimum, memtier_json_output, threads):
+    keyspace_distribution = memtier_json_output["Client keyspace distribution"]
+    overall_keyspace_start = keyspace_distribution["thread-1"]["client-1"]["key_min"]
+    overall_keyspace_end = keyspace_distribution["thread-{}".format(threads)]["client-{}".format(clients)][
+        "key_max"]
+    env.assertEqual(overall_keyspace_start, key_minimum)
+    env.assertEqual(overall_keyspace_end, key_maximum)
+    previous_max = key_minimum
+    for thread_id in range(1, threads + 1):
+        thread_keyspace_distribution = keyspace_distribution["thread-{}".format(thread_id)]
+        for client_id in range(1, clients + 1):
+            client_keyspace_distribution = thread_keyspace_distribution["client-{}".format(client_id)]
+            key_min = client_keyspace_distribution["key_min"]
+            key_max = client_keyspace_distribution["key_max"]
+            # env.debugPrint("[{0} {1}]".format(key_min,key_max), True)
+            if thread_id > 1 and client_id > 1:
+                env.assertEqual(key_min, previous_max + 1)
+            previous_max = key_max
+    return previous_max
+
+
+def assert_ParallelKeyspaceDistribution_RoundRobin(clients, env, key_minimum, key_range_size, memtier_json_output,
+                                                   threads):
+    keyspace_distribution = memtier_json_output["Client keyspace distribution"]
+    for thread_id in range(1, threads + 1):
+        thread_keyspace_distribution = keyspace_distribution["thread-{}".format(thread_id)]
+        for client_id in range(1, clients + 1):
+            client_keyspace_distribution = thread_keyspace_distribution["client-{}".format(client_id)]
+            key_min = client_keyspace_distribution["key_min"]
+            key_max = client_keyspace_distribution["key_max"]
+            client_index = client_keyspace_distribution["client_index"]
+            key_pos = key_minimum + (client_index % key_range_size)
+            env.assertEqual(key_min, key_max)
+            env.assertEqual(key_pos, key_min)
+            env.assertEqual(key_pos, key_max)
