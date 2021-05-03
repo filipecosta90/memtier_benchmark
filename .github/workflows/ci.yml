@@ -43,25 +43,25 @@ jobs:
         cd ..
 
     - name: Test OSS TCP
-      timeout: 10m
+      timeout-minutes: 10
       run: |
         cd tests 
         MEMTIER_BINARY=./../memtier_benchmark \
-        python3 -m RLTest \
+        RLTest \
         --env oss -v --clear-logs \
         --oss-redis-path ../redis/src/redis-server
         cd ..
 
     - name: Test OSS TCP TLS
       if: matrix.platform == 'ubuntu-latest'
-      timeout: 10m
+      timeout-minutes: 10
       run: |
         cd tests
         TLS_CERT=../redis/tests/tls/redis.crt \
         TLS_KEY=../redis/tests/tls/redis.key \
         TLS_CACERT=../redis/tests/tls/ca.crt \
         MEMTIER_BINARY=../memtier_benchmark \
-        python3 -m RLTest \
+        RLTest \
           --env oss -v --clear-logs \
           --oss-redis-path ../redis/src/redis-server \
           --tls-cert-file ../redis/tests/tls/redis.crt \
@@ -71,17 +71,17 @@ jobs:
         cd ..
 
     - name: Test OSS-CLUSTER TCP
-      timeout: 10m
+      timeout-minutes: 10
       run: |
         cd tests 
         MEMTIER_BINARY=./../memtier_benchmark \
-        python3 -m RLTest \
+        RLTest \
         --env oss-cluster -v --clear-logs --shards-count 3 \
         --oss-redis-path ../redis/src/redis-server
         cd ..
 
     - name: Test OSS-CLUSTER TCP TLS
-      timeout: 10m
+      timeout-minutes: 10
       if: matrix.platform == 'ubuntu-latest'
       run: |
         cd tests
@@ -89,7 +89,7 @@ jobs:
         TLS_KEY=../redis/tests/tls/redis.key \
         TLS_CACERT=../redis/tests/tls/ca.crt \
         MEMTIER_BINARY=../memtier_benchmark \
-        python3 -m RLTest \
+        RLTest \
           --env oss-cluster --shards-count 3 -v --clear-logs \
           --oss-redis-path ../redis/src/redis-server \
           --tls-cert-file ../redis/tests/tls/redis.crt \
