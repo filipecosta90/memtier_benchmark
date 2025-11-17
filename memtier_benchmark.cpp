@@ -59,6 +59,7 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <atomic>
 
 #include "client.h"
 #include "JSON_handler.h"
@@ -1382,7 +1383,7 @@ struct cg_thread {
     client_group* m_cg;
     abstract_protocol* m_protocol;
     pthread_t m_thread;
-    bool m_finished;
+    std::atomic<bool> m_finished;  // Atomic to prevent data race between worker thread write and main thread read
     bool m_restart_requested;
     unsigned int m_restart_count;
 
@@ -1543,6 +1544,9 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
     }
 
     // provide some feedback...
+    // NOTE: Reading stats from worker threads without synchronization is a benign race.
+    // These stats are only for progress display and are approximate. Final results are
+    // collected after pthread_join() when all threads have finished (race-free).
     unsigned int active_threads = 0;
     unsigned int second_counter = 0;
     do {
@@ -2356,6 +2360,16 @@ int main(int argc, char *argv[])
 
     if (cfg.arbitrary_commands != NULL) {
         delete cfg.arbitrary_commands;
+    }
+
+    // Clean up dynamically allocated strings from URI parsing
+    if (cfg.uri) {
+        if (cfg.server) {
+            free((void*)cfg.server);
+        }
+        if (cfg.authenticate) {
+            free((void*)cfg.authenticate);
+        }
     }
 
 #ifdef USE_TLS

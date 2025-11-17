@@ -136,6 +136,49 @@ To understand what test options are available simply run:
 
     $ ./tests/run_tests.sh --help
 
+
+**Memory leak detection with sanitizers**
+
+
+memtier_benchmark supports building with AddressSanitizer (ASAN) and LeakSanitizer (LSAN) to detect memory errors and leaks during testing.
+
+To build with sanitizers enabled:
+
+    $ ./configure --enable-sanitizers
+    $ make
+
+To run tests with leak detection:
+
+    $ ASAN_OPTIONS=detect_leaks=1 ./tests/run_tests.sh
+
+If memory leaks or errors are detected, tests will fail with detailed error messages showing the location of the issue.
+
+To verify ASAN is enabled:
+
+    $ ldd ./memtier_benchmark | grep asan
+
+
+**Data race detection with Thread Sanitizer**
+
+
+memtier_benchmark supports building with ThreadSanitizer (TSAN) to detect data races and threading issues.
+
+To build with Thread Sanitizer enabled:
+
+    $ ./configure --enable-thread-sanitizer
+    $ make
+
+To run tests with race detection (requires disabling ASLR on kernel 6.6+):
+
+    $ TSAN_OPTIONS="suppressions=$(pwd)/tsan_suppressions.txt" setarch `uname -m` -R ./tests/run_tests.sh
+
+To verify TSAN is enabled:
+
+    $ ldd ./memtier_benchmark | grep tsan
+
+**Note:** TSAN and ASAN are mutually exclusive and cannot be used together. A suppression file (`tsan_suppressions.txt`) is provided to ignore known benign data races that do not affect correctness.
+
+
 ## Using Docker
 
 Use available images on Docker Hub:
