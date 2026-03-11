@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Redis Labs Ltd.
+ * Copyright (C) 2011-2026 Redis Labs Ltd.
  *
  * This file is part of memtier_benchmark.
  *
@@ -25,29 +25,32 @@
 #include <list>
 
 // enum for holding type of nesting
-typedef enum{
+typedef enum
+{
     NESTED_GENERAL, // {}
     NESTED_ARRAY    // []
-}eJSON_NESTED_TYPE;
+} eJSON_NESTED_TYPE;
 
-/** represents an JSON handler, At this phase, only writes to JSON. */ 
-class json_handler {
+/** represents an JSON handler, At this phase, only writes to JSON. */
+class json_handler
+{
 protected:
-    FILE * m_json_file; 
+    FILE *m_json_file;
     // This list is used later for closing the nesting
-    std::list<eJSON_NESTED_TYPE>    m_nest_closer_types;
+    std::list<eJSON_NESTED_TYPE> m_nest_closer_types;
     void beutify(bool only_tabs = false);
-public:
-    json_handler(const char * jsonfilename);
-    ~json_handler();
-    
-    // Write a single object to JSON
-    void write_obj(const char * objectname, const char * format, ...);
 
-    // Starts nesting, the type is used for deciding which charecter to be used for opening and closing 
+public:
+    json_handler(const char *jsonfilename);
+    ~json_handler();
+
+    // Write a single object to JSON
+    void write_obj(const char *objectname, const char *format, ...);
+
+    // Starts nesting, the type is used for deciding which charecter to be used for opening and closing
     // the nesting ('{}','[]')
-    void open_nesting(const char * objectname,eJSON_NESTED_TYPE type = NESTED_GENERAL);
-    
+    void open_nesting(const char *objectname, eJSON_NESTED_TYPE type = NESTED_GENERAL);
+
     // returns the nested level left after closing
     int close_nesting();
 };

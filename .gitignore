@@ -2,9 +2,12 @@ aclocal.m4
 autom4te.cache
 config.guess
 config.h.in
+config.h.in~
 config.h
 config.sub
 configure
+configure~
+compile
 depcomp
 install-sh
 ltmain.sh
@@ -19,3 +22,32 @@ config.log
 config.status
 libtool
 stamp-h1
+version.h
+*.DS_Store
+.vscode/*
+.idea/*
+
+# tls helper related files
+tests/tls/*
+
+# memtier outputs
+*.hgrm
+*.txt
+!/tests/test_requirements.txt
+__pycache__
+*.csv
+*.json
+
+# Code coverage with lcov/gcov
+*.gcno
+*.gcov
+*.gcda
+*.info
+
+# redis related
+*.rdb
+*.aof
+appendonlydir/
+*.conf
+
+tests/.env/

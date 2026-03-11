@@ -1,0 +1,126 @@
+name: ASAN (AddressSanitizer & LeakSanitizer)
+
+# Memory error and leak detection using AddressSanitizer and LeakSanitizer
+# This workflow builds memtier_benchmark with sanitizers enabled and runs
+# the full test suite to detect memory leaks and address errors.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build-asan:
+    runs-on: ubuntu-latest
+    name: Build with ASAN
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          pkg-config \
+          libevent-dev \
+          zlib1g-dev \
+          libssl-dev
+
+    - name: Build with sanitizers
+      run: |
+        autoreconf -ivf
+        ./configure --enable-sanitizers
+        make -j
+
+    - name: Verify ASAN is enabled
+      run: |
+        ldd ./memtier_benchmark | grep asan
+        echo "✓ AddressSanitizer is linked"
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: memtier-asan-build
+        path: |
+          memtier_benchmark
+        retention-days: 1
+
+  test-asan:
+    needs: build-asan
+    strategy:
+      fail-fast: false
+      matrix:
+        test-config:
+          - name: "Single Endpoint: TCP Plaintext"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "0", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: false
+          - name: "Single Endpoint: TCP TLS"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "1", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: true
+          - name: "OSS TCP TLS v1.2"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "1", TLS_PROTOCOLS: "TLSv1.2", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: true
+          - name: "OSS TCP TLS v1.3"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "1", TLS_PROTOCOLS: "TLSv1.3", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: true
+          - name: "OSS-CLUSTER API: TCP Plaintext"
+            env: { OSS_STANDALONE: "0", OSS_CLUSTER: "1", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: false
+          - name: "OSS-CLUSTER API: TCP TLS"
+            env: { OSS_STANDALONE: "0", OSS_CLUSTER: "1", TLS: "1", VERBOSE: "1", ASAN_OPTIONS: "detect_leaks=1" }
+            tls: true
+    runs-on: ubuntu-latest
+    name: ASAN ${{ matrix.test-config.name }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: memtier-asan-build
+
+    - name: Restore executable permissions
+      run: chmod +x memtier_benchmark
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get install -y pkg-config libevent-dev libssl-dev
+
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        architecture: x64
+
+    - name: Install Python test dependencies
+      run: pip install -r ./tests/test_requirements.txt
+
+    - name: Install Redis
+      run: |
+        curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+        sudo apt-get -qq update
+        sudo apt-get install redis
+        sudo service redis-server stop
+
+    - name: Increase connection limit
+      run: |
+        sudo sysctl -w net.ipv4.tcp_fin_timeout=10
+        sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+        ulimit -n 40960
+
+    - name: Generate TLS test certificates
+      if: matrix.test-config.tls
+      run: ./tests/gen-test-certs.sh
+
+    - name: Run tests
+      timeout-minutes: 10
+      env: ${{ matrix.test-config.env }}
+      run: |
+        ./tests/run_tests.sh
+

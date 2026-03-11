@@ -1,0 +1,126 @@
+name: TSAN (ThreadSanitizer)
+
+# Data race detection using ThreadSanitizer
+# This workflow builds memtier_benchmark with TSAN enabled and runs
+# tests to detect data races and threading issues.
+#
+# NOTE: TSAN currently detects known data races in the codebase.
+# This workflow is informational and will not fail the build.
+# See: https://github.com/google/sanitizers/issues/1716 for TSAN/ASLR issues
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build-tsan:
+    runs-on: ubuntu-latest
+    name: Build with TSAN
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          pkg-config \
+          libevent-dev \
+          zlib1g-dev \
+          libssl-dev
+
+    - name: Build with Thread Sanitizer
+      run: |
+        autoreconf -ivf
+        ./configure --enable-thread-sanitizer
+        make -j
+
+    - name: Verify TSAN is enabled
+      run: |
+        ldd ./memtier_benchmark | grep tsan
+        echo "✓ ThreadSanitizer is linked"
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: memtier-tsan-build
+        path: |
+          memtier_benchmark
+          tsan_suppressions.txt
+        retention-days: 1
+
+  test-tsan:
+    needs: build-tsan
+    strategy:
+      fail-fast: false
+      matrix:
+        test-config:
+          - name: "Single Endpoint: TCP Plaintext"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "0", VERBOSE: "1" }
+            tls: false
+          - name: "Single Endpoint: TCP TLS"
+            env: { OSS_STANDALONE: "1", OSS_CLUSTER: "0", TLS: "1", VERBOSE: "1" }
+            tls: true
+          - name: "OSS-CLUSTER API: TCP Plaintext"
+            env: { OSS_STANDALONE: "0", OSS_CLUSTER: "1", VERBOSE: "1" }
+            tls: false
+    runs-on: ubuntu-latest
+    name: TSAN ${{ matrix.test-config.name }}
+    continue-on-error: true  # Don't fail build on known races
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: memtier-tsan-build
+
+    - name: Restore executable permissions
+      run: chmod +x memtier_benchmark
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get install -y pkg-config libevent-dev libssl-dev
+
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        architecture: x64
+
+    - name: Install Python test dependencies
+      run: pip install -r ./tests/test_requirements.txt
+
+    - name: Install Redis
+      run: |
+        curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+        sudo apt-get -qq update
+        sudo apt-get install redis
+        sudo service redis-server stop
+
+    - name: Increase connection limit
+      run: |
+        sudo sysctl -w net.ipv4.tcp_fin_timeout=10
+        sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+        ulimit -n 40960
+
+    - name: Generate TLS test certificates
+      if: matrix.test-config.tls
+      run: ./tests/gen-test-certs.sh
+
+    - name: Run tests
+      timeout-minutes: 15
+      env: ${{ matrix.test-config.env }}
+      run: |
+        # Use setarch to disable ASLR (workaround for TSAN on kernel 6.6+)
+        # Use suppression file to ignore known benign races
+        export TSAN_OPTIONS="suppressions=$(pwd)/tsan_suppressions.txt"
+        setarch `uname -m` -R bash -c './tests/run_tests.sh'
+

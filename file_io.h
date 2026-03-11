@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Redis Labs Ltd.
+ * Copyright (C) 2011-2026 Redis Labs Ltd.
  *
  * This file is part of memtier_benchmark.
  *
@@ -25,34 +25,37 @@
 /** Provides a mechanism to read a CSV-like memcache_dump file and extract memcache
  * items from it.
  */
-class file_reader {
+class file_reader
+{
 protected:
-    const char *m_filename;     /** name of file */
-    FILE* m_file;               /** handle of open file */
+    const char *m_filename; /** name of file */
+    FILE *m_file;           /** handle of open file */
 
-    unsigned int m_line;        /** current line being read */
+    unsigned int m_line; /** current line being read */
 
-    char* read_string(unsigned int len, unsigned int alloc_len, unsigned int* actual_len);
+    char *read_string(unsigned int len, unsigned int alloc_len, unsigned int *actual_len);
+
 public:
     file_reader(const char *filename);
-    file_reader(const file_reader& from);
+    file_reader(const file_reader &from);
     ~file_reader();
 
     bool open_file(void);
     bool is_eof(void);
-    memcache_item* read_item(void);
+    memcache_item *read_item(void);
 };
 
 
 /** Provides a mechanism to write memcache items into a CSV-like memcache_dump file.
  */
-class file_writer {
+class file_writer
+{
 protected:
-    const char *m_filename;     /** name of file */
-    FILE *m_file;               /** handle of open file */
+    const char *m_filename; /** name of file */
+    FILE *m_file;           /** handle of open file */
 
-    char* get_quoted_str(char* str, int str_len, int* new_str_len);
-    
+    char *get_quoted_str(char *str, int str_len, int *new_str_len);
+
 public:
     file_writer(const char *filename);
     ~file_writer();
@@ -61,4 +64,4 @@ public:
     bool write_item(memcache_item *item);
 };
 
-#endif  /* _FILE_IO_H */
+#endif /* _FILE_IO_H */
