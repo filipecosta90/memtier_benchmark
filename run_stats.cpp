@@ -148,6 +148,21 @@ run_stats::run_stats(benchmark_config *config) :
 }
 
 
+void run_stats::update_zscan_work(bool valid, unsigned long long members, unsigned int bytes, bool complete,
+                                  bool capped)
+{
+    ++m_zscan_work.responses;
+    if (!valid) {
+        ++m_zscan_work.invalid;
+        return;
+    }
+    ++m_zscan_work.pages;
+    m_zscan_work.members += members;
+    m_zscan_work.response_bytes += bytes;
+    m_zscan_work.completed += complete;
+    m_zscan_work.capped += capped;
+}
+
 void run_stats::setup_arbitrary_commands(size_t n_arbitrary_commands)
 {
     m_totals.setup_arbitrary_commands(n_arbitrary_commands);
@@ -943,6 +958,7 @@ void run_stats::aggregate_average(const std::vector<run_stats> &all_stats)
         totals i_totals;
         i_totals.setup_arbitrary_commands(m_totals.m_ar_commands.size());
 
+        m_zscan_work.add(i->m_zscan_work);
         i->summarize(i_totals);
         m_totals.add(i_totals);
 
@@ -1049,6 +1065,7 @@ void run_stats::aggregate_average(const std::vector<run_stats> &all_stats)
 
 void run_stats::merge(const run_stats &other, int iteration)
 {
+    m_zscan_work.add(other.m_zscan_work);
     bool new_stats = false;
 
     m_start_time = timeval_factorial_average(m_start_time, other.m_start_time, iteration);
@@ -1900,6 +1917,25 @@ void run_stats::print_json(json_handler *jsonhandler, arbitrary_command_list &co
         jsonhandler->write_obj("Total duration", "%lld", end_time_ms - start_time_ms);
         jsonhandler->write_obj("Time unit", "\"%s\"", "MILLISECONDS");
         jsonhandler->write_obj("Interrupted", "\"%s\"", m_interrupted ? "true" : "false");
+        jsonhandler->close_nesting();
+    }
+
+    if (jsonhandler != NULL && m_config->scan_incremental_iteration &&
+        strcasecmp(command_list[0].command_type.c_str(), "ZSCAN 0") == 0) {
+        const unsigned long long duration = ts_diff(m_start_time, m_end_time);
+        const double seconds = (double) duration / 1000000.0;
+        jsonhandler->open_nesting("ZSCAN Work");
+        jsonhandler->write_obj("Responses", "%llu", m_zscan_work.responses);
+        jsonhandler->write_obj("Pages", "%llu", m_zscan_work.pages);
+        jsonhandler->write_obj("Returned Members", "%llu", m_zscan_work.members);
+        jsonhandler->write_obj("Response Bytes", "%llu", m_zscan_work.response_bytes);
+        jsonhandler->write_obj("Completed Iterations", "%llu", m_zscan_work.completed);
+        jsonhandler->write_obj("Capped Iterations", "%llu", m_zscan_work.capped);
+        jsonhandler->write_obj("Invalid or Error Replies", "%llu", m_zscan_work.invalid);
+        jsonhandler->write_obj("Duration Seconds", "%.6f", seconds);
+        jsonhandler->write_obj("Members/sec", "%.6f", seconds > 0 ? m_zscan_work.members / seconds : 0.0);
+        jsonhandler->write_obj("Iterations/sec", "%.6f", seconds > 0 ? m_zscan_work.completed / seconds : 0.0);
+        jsonhandler->write_obj("Response Bytes/sec", "%.6f", seconds > 0 ? m_zscan_work.response_bytes / seconds : 0.0);
         jsonhandler->close_nesting();
     }
 

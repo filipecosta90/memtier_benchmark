@@ -222,6 +222,20 @@ per walk (zero means unlimited). Statistics separate initial requests, such as
 initial statistics label remains `0` even when the command specifies a nonzero
 starting cursor; each new walk restarts at that supplied cursor.
 
+With incremental `ZSCAN`, JSON output also includes `ZSCAN Work`: successful
+pages, returned members, reply bytes, naturally completed iterations, capped
+iterations, and invalid/error replies. `Members/sec`, `Iterations/sec`, and
+`Response Bytes/sec` use the same measured interval as the request statistics.
+Existing request counts, throughput, and latency remain available.
+
+Returned members include duplicates and partial final iterations; they are not
+unique coverage. Reply bytes count successful ZSCAN replies, including RESP
+framing. An iteration completes only when a chain starting at cursor `0` reaches
+cursor `0` naturally, without an intervening invalid/error reply. Nonzero starting
+cursors and capped chains do not count as completed iterations. In a multi-run
+aggregate these counters and durations are summed, giving rates weighted by run
+duration. Verify unique coverage separately on an unchanged dataset.
+
 ## Crash Reporting
 
 memtier_benchmark includes built-in crash handling that automatically generates detailed bug reports when the program crashes. If you encounter a crash, the tool will print a comprehensive report including:

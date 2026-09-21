@@ -108,6 +108,21 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
         m_scan_args.resize(std::max(config->arbitrary_commands->at(0).command_args.size(),
                                     config->scan_continuation_command->command_args.size()));
         MAIN_CONNECTION->get_protocol()->set_keep_value(true);
+        // Configuration arguments are RESP-framed by this point; parse the original
+        // command once to inspect its cursor and NOSCORES option.
+        arbitrary_command initial(config->arbitrary_commands->at(0).command.c_str());
+        if (initial.split_command_to_args() && strcasecmp(initial.command_args[0].data.c_str(), "ZSCAN") == 0) {
+            m_zscan_member_stride = 2;
+            m_zscan_starts_at_zero = initial.command_args[2].data == "0";
+            for (size_t i = 3; i < initial.command_args.size(); ++i) {
+                const std::string &option = initial.command_args[i].data;
+                if (strcasecmp(option.c_str(), "MATCH") == 0 || strcasecmp(option.c_str(), "COUNT") == 0) {
+                    ++i;
+                } else if (strcasecmp(option.c_str(), "NOSCORES") == 0) {
+                    m_zscan_member_stride = 1;
+                }
+            }
+        }
     }
 
     // Enable per-element miss tracking only when a configured command needs
@@ -182,6 +197,9 @@ client::client(client_group *group) :
         m_tot_wait_ops(0),
         m_scan_cursor("0"),
         m_scan_iteration_count(0),
+        m_zscan_member_stride(0),
+        m_zscan_starts_at_zero(false),
+        m_zscan_walk_valid(false),
         m_mget_defer(false),
         m_arbitrary_needs_elem_tracking(false),
         m_request_rate_phase_microsecond(0)
@@ -218,6 +236,9 @@ client::client(struct event_base *event_base, benchmark_config *config, abstract
         m_tot_wait_ops(0),
         m_scan_cursor("0"),
         m_scan_iteration_count(0),
+        m_zscan_member_stride(0),
+        m_zscan_starts_at_zero(false),
+        m_zscan_walk_valid(false),
         m_keylist(NULL),
         m_mget_defer(false),
         m_arbitrary_needs_elem_tracking(false),
@@ -987,10 +1008,38 @@ void client::handle_response(unsigned int conn_id, struct timeval timestamp, req
             }
         }
 
+        if (m_zscan_member_stride) {
+            if (ar->index == 0) m_zscan_walk_valid = m_zscan_starts_at_zero;
+            mbulk_size_el *top = response->get_mbulk_value();
+            bool valid = !response->is_error() && top && top->mbulks_elements.size() == 2 &&
+                         top->mbulks_elements[0]->is_bulk() && top->mbulks_elements[1]->is_mbulk_size();
+            unsigned long long members = 0;
+            bool complete = false, capped = false;
+            if (valid) {
+                bulk_el *cursor = top->mbulks_elements[0]->as_bulk();
+                const std::vector<mbulk_element *> &items = top->mbulks_elements[1]->as_mbulk_size()->mbulks_elements;
+                valid = cursor->value && cursor->value_len > 0 && !cursor->is_resp3_null &&
+                        items.size() % m_zscan_member_stride == 0;
+                for (unsigned int i = 0; valid && i < cursor->value_len; ++i)
+                    valid = cursor->value[i] >= '0' && cursor->value[i] <= '9';
+                for (size_t i = 0; valid && i < items.size(); ++i)
+                    valid = items[i]->is_bulk() && !items[i]->as_bulk()->is_resp3_null;
+                if (valid) {
+                    members = items.size() / m_zscan_member_stride;
+                    const bool terminal = cursor->value_len == 1 && cursor->value[0] == '0';
+                    complete = terminal && m_zscan_walk_valid;
+                    capped = !terminal && m_config->scan_incremental_max_iterations > 0 &&
+                             m_scan_iteration_count + (ar->index == 1) >= m_config->scan_incremental_max_iterations;
+                }
+            }
+            if (!valid) m_zscan_walk_valid = false;
+            m_stats.update_zscan_work(valid, members, response->get_total_len(), complete, capped);
+        }
+
         // Extract cursor from SCAN response for incremental iteration
         if (m_config->scan_incremental_iteration && !response->is_error()) {
             mbulk_size_el *top = response->get_mbulk_value();
-            if (top && top->mbulks_elements.size() >= 1) {
+            if (top && top->mbulks_elements.size() >= 1 && top->mbulks_elements[0]->is_bulk()) {
                 bulk_el *cursor_el = top->mbulks_elements[0]->as_bulk();
                 if (cursor_el && cursor_el->value && cursor_el->value_len > 0) {
                     m_scan_cursor.assign(cursor_el->value, cursor_el->value_len);

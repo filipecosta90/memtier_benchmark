@@ -104,6 +104,9 @@ protected:
     std::string m_scan_cursor;
     std::vector<std::string> m_scan_args; // Generated argument bytes retained for the current cursor chain.
     unsigned int m_scan_iteration_count;
+    unsigned int m_zscan_member_stride;
+    bool m_zscan_starts_at_zero;
+    bool m_zscan_walk_valid;
 
     keylist *m_keylist; // used to construct multi commands
 

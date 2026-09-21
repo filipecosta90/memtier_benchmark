@@ -221,11 +221,33 @@ protected:
     };
     std::vector<arbitrary_misses_total> m_arbitrary_misses;
 
+    struct zscan_work_totals
+    {
+        unsigned long long responses = 0;
+        unsigned long long pages = 0;
+        unsigned long long members = 0;
+        unsigned long long response_bytes = 0;
+        unsigned long long completed = 0;
+        unsigned long long capped = 0;
+        unsigned long long invalid = 0;
+        void add(const zscan_work_totals &other)
+        {
+            responses += other.responses;
+            pages += other.pages;
+            members += other.members;
+            response_bytes += other.response_bytes;
+            completed += other.completed;
+            capped += other.capped;
+            invalid += other.invalid;
+        }
+    } m_zscan_work;
+
     void roll_cur_stats(struct timeval *ts);
 
 public:
     run_stats(benchmark_config *config);
     void setup_arbitrary_commands(size_t n_arbitrary_commands);
+    void update_zscan_work(bool valid, unsigned long long members, unsigned int bytes, bool complete, bool capped);
     void set_start_time(struct timeval *start_time);
     void set_end_time(struct timeval *end_time);
     void set_interrupted(bool interrupted) { m_interrupted = interrupted; }
