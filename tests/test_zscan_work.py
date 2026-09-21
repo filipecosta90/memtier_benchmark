@@ -143,8 +143,13 @@ def test_zscan_work_scripted_replies(env):
         ('ZSCAN key 0', [page(b'bad')], 0, 0, 0, 1),
         ('ZSCAN key 0', [page(b'9'), b'-ERR broken\r\n', page(b'0')], 2, 2, 1, 1),
         ('ZSCAN key 0 NOSCORES', [page(b'0', b'*1\r\n$1\r\na\r\n')], 1, 1, 1, 0),
+        ('ZSCAN key 0', [page(b'9'), b'-TRYAGAIN retry\r\n'],
+         1, 1, 0, 0, ['--retry-on-error', '--max-retries', '1'], 2),
     ]
-    for command, replies, pages, members, completed, invalid in cases:
+    for case in cases:
+        command, replies, pages, members, completed, invalid = case[:6]
+        extra = case[6] if len(case) > 6 else []
+        requests = case[7] if len(case) > 7 else len(replies)
         errors = []
         with socket.socket() as listener, tempfile.TemporaryDirectory() as directory:
             listener.bind(('127.0.0.1', 0))
@@ -179,15 +184,16 @@ def test_zscan_work_scripted_replies(env):
             try:
                 result = subprocess.run([
                     MEMTIER_BINARY, '-s', '127.0.0.1', '-p', str(listener.getsockname()[1]),
-                    '-t', '1', '-c', '1', '-n', str(len(replies)), '--pipeline', '1',
+                    '-t', '1', '-c', '1', '-n', str(requests), '--pipeline', '1',
                     '--command', command, '--scan-incremental-iteration',
-                    '--hide-histogram', '--json-out-file', path],
+                    '--hide-histogram', '--json-out-file', path] + extra,
                     capture_output=True, text=True, timeout=15)
                 env.assertEqual(result.returncode, 0, message=result.stderr)
                 with open(path) as stream:
                     stats = json.load(stream)['ALL STATS']
                 work = stats['ZSCAN Work']
-                env.assertEqual(work['Responses'], len(replies))
+                env.assertEqual(work['Responses'], pages + invalid)
+                env.assertEqual(work['Responses'], stats['Totals']['Count'])
                 env.assertEqual(work['Pages'], pages)
                 env.assertEqual(work['Returned Members'], members)
                 env.assertEqual(work['Completed Iterations'], completed)
@@ -196,3 +202,26 @@ def test_zscan_work_scripted_replies(env):
                 worker.join(timeout=11)
             env.assertFalse(worker.is_alive())
             env.assertEqual(errors, [])
+
+
+
+def test_zscan_work_generated_cursor_origins(env):
+    conn = env.getConnection()
+    conn.delete('work:missing')
+    for protocol in ('redis', 'resp3'):
+        with tempfile.TemporaryDirectory() as directory:
+            # The normal generator has a fixed seed unless --randomize is set.
+            # One-byte data samples include numeric and invalid cursor bytes.
+            benchmark, config = _build(env, directory, [
+                '--command', 'ZSCAN work:missing __data__', '--scan-incremental-iteration',
+                '--protocol', protocol, '--random-data', '--data-size', '1'], 4096, 1, 1)
+            ok, records = _capture(conn, benchmark)
+            env.assertTrue(ok, message=_read_file(config, 'mb.stderr'))
+            env.assertEqual(len(records), 4096)
+            origins = [args[2] for _, args in records]
+            env.assertGreater(origins.count(b'0'), 0)
+            env.assertGreater(origins.count(b'1'), 0)
+            stats = json.loads(_read_file(config, 'mb.json'))['ALL STATS']
+            env.assertEqual(stats['Zscan 0s']['Count'], 4096)
+            env.assertEqual(stats['ZSCAN Work']['Responses'], 4096)
+            env.assertEqual(stats['ZSCAN Work']['Completed Iterations'], origins.count(b'0'))

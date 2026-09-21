@@ -1009,7 +1009,11 @@ void client::handle_response(unsigned int conn_id, struct timeval timestamp, req
         }
 
         if (m_zscan_member_stride) {
-            if (ar->index == 0) m_zscan_walk_valid = m_zscan_starts_at_zero;
+            if (ar->index == 0) {
+                const command_arg &cursor_arg = m_config->arbitrary_commands->at(0).command_args[2];
+                const bool generated = cursor_arg.type == key_type || cursor_arg.type == data_type;
+                m_zscan_walk_valid = generated ? m_scan_args[2] == "0" : m_zscan_starts_at_zero;
+            }
             mbulk_size_el *top = response->get_mbulk_value();
             bool valid = !response->is_error() && top && top->mbulks_elements.size() == 2 &&
                          top->mbulks_elements[0]->is_bulk() && top->mbulks_elements[1]->is_mbulk_size();

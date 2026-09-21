@@ -224,14 +224,17 @@ starting cursor; each new walk restarts at that supplied cursor.
 
 With incremental `ZSCAN`, JSON output also includes `ZSCAN Work`: successful
 pages, returned members, reply bytes, naturally completed iterations, capped
-iterations, and invalid/error replies. `Members/sec`, `Iterations/sec`, and
+iterations, and recognized invalid/error outcomes. `Members/sec`, `Iterations/sec`, and
 `Response Bytes/sec` use the same measured interval as the request statistics.
-Existing request counts, throughput, and latency remain available.
+Existing request counts, throughput, and latency remain available. Responses
+and errors describe terminal outcomes included in request statistics; transient
+attempts handled by `--retry-on-error` are excluded. Reply-shape checks use the
+parser-normalized representation and are not a complete RESP validator.
 
 Returned members include duplicates and partial final iterations; they are not
 unique coverage. Reply bytes count successful ZSCAN replies, including RESP
 framing. An iteration completes only when a chain starting at cursor `0` reaches
-cursor `0` naturally, without an intervening invalid/error reply. Nonzero starting
+cursor `0` naturally, without an intervening invalid/error terminal outcome. Nonzero starting
 cursors and capped chains do not count as completed iterations. In a multi-run
 aggregate these counters and durations are summed, giving rates weighted by run
 duration. Verify unique coverage separately on an unchanged dataset.
