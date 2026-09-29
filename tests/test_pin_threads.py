@@ -112,7 +112,17 @@ int pthread_attr_setaffinity_np(pthread_attr_t *attr, size_t size, const cpu_set
         config = RunConfig(directory, env.testName, config, {})
         ensure_clean_benchmark_folder(config.results_dir)
         benchmark = Benchmark.from_json(config, specs)
-        child_env = dict(os.environ, LD_PRELOAD=str(library))
+        # Sanitizer runtimes must load before the injected library. Preserve any
+        # caller-supplied preloads too, rather than silently dropping them.
+        linked = subprocess.run(['ldd', benchmark.args[0]], capture_output=True,
+                                text=True, timeout=10).stdout
+        runtimes = [line.split()[2] for line in linked.splitlines()
+                    if line.strip().startswith(('libasan.so', 'libtsan.so'))
+                    and '=>' in line and len(line.split()) >= 3]
+        preloads = runtimes + [str(library)]
+        if os.environ.get('LD_PRELOAD'):
+            preloads.append(os.environ['LD_PRELOAD'])
+        child_env = dict(os.environ, LD_PRELOAD=':'.join(preloads))
         result = subprocess.run(benchmark.args, env=child_env, capture_output=True, timeout=10)
         env.assertEqual(result.returncode, 1)
         env.assertIn('failed to start thread', result.stderr.decode(errors='replace'))
