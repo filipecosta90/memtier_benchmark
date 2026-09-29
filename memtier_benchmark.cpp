@@ -34,6 +34,9 @@
 #include "version.h"
 
 #include <pthread.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -610,6 +613,7 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
             "rate_limit = %u\n"
             "clients = %u\n"
             "threads = %u\n"
+            "pin_threads = %s\n"
             "test_time = %u\n"
             "ratio = %u:%u\n"
             "pipeline = %u\n"
@@ -669,14 +673,15 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
             cfg->tls_sni,
 #endif
             cfg->out_file, cfg->client_stats, cfg->run_count, cfg->debug, cfg->requests, cfg->request_rate,
-            cfg->clients, cfg->threads, cfg->test_time, cfg->ratio.a, cfg->ratio.b, cfg->pipeline,
-            cfg->transaction ? "yes" : "no", cfg->data_size, cfg->data_offset, cfg->random_data ? "yes" : "no",
-            cfg->data_size_range.min, cfg->data_size_range.max, cfg->data_size_list.print(tmpbuf, sizeof(tmpbuf) - 1),
-            cfg->data_size_pattern, cfg->expiry_range.min, cfg->expiry_range.max, cfg->data_import,
-            cfg->data_verify ? "yes" : "no", cfg->verify_only ? "yes" : "no", cfg->generate_keys ? "yes" : "no",
-            cfg->key_prefix, cfg->key_minimum, cfg->key_maximum, cfg->key_pattern, cfg->key_stddev, cfg->key_median,
-            cfg->reconnect_interval, cfg->retry_on_error ? "yes" : "no", cfg->max_retries, cfg->retry_backoff_ms,
-            cfg->retry_backoff_factor, cfg->retry_on_filter ? cfg->retry_on_filter : "", cfg->max_retry_queue,
+            cfg->clients, cfg->threads, cfg->pin_threads ? "yes" : "no", cfg->test_time, cfg->ratio.a, cfg->ratio.b,
+            cfg->pipeline, cfg->transaction ? "yes" : "no", cfg->data_size, cfg->data_offset,
+            cfg->random_data ? "yes" : "no", cfg->data_size_range.min, cfg->data_size_range.max,
+            cfg->data_size_list.print(tmpbuf, sizeof(tmpbuf) - 1), cfg->data_size_pattern, cfg->expiry_range.min,
+            cfg->expiry_range.max, cfg->data_import, cfg->data_verify ? "yes" : "no", cfg->verify_only ? "yes" : "no",
+            cfg->generate_keys ? "yes" : "no", cfg->key_prefix, cfg->key_minimum, cfg->key_maximum, cfg->key_pattern,
+            cfg->key_stddev, cfg->key_median, cfg->reconnect_interval, cfg->retry_on_error ? "yes" : "no",
+            cfg->max_retries, cfg->retry_backoff_ms, cfg->retry_backoff_factor,
+            cfg->retry_on_filter ? cfg->retry_on_filter : "", cfg->max_retry_queue,
             cfg->failed_keys_file ? cfg->failed_keys_file : "", cfg->connection_timeout, cfg->connection_stage_timeout,
             cfg->thread_conn_start_min_jitter_micros, cfg->thread_conn_start_max_jitter_micros, cfg->multi_key_get,
             cfg->authenticate ? cfg->authenticate : "", cfg->select_db, cfg->no_expiry ? "yes" : "no",
@@ -721,6 +726,7 @@ static void config_print_to_json(json_handler *jsonhandler, struct benchmark_con
     jsonhandler->write_obj("rate_limit", "%u", cfg->request_rate);
     jsonhandler->write_obj("clients", "%u", cfg->clients);
     jsonhandler->write_obj("threads", "%u", cfg->threads);
+    jsonhandler->write_obj("pin_threads", "%s", cfg->pin_threads ? "true" : "false");
     jsonhandler->write_obj("test_time", "%u", cfg->test_time);
     jsonhandler->write_obj("ratio", "\"%u:%u\"", cfg->ratio.a, cfg->ratio.b);
     jsonhandler->write_obj("pipeline", "%u", cfg->pipeline);
@@ -977,6 +983,7 @@ static void config_init_defaults(struct benchmark_config *cfg)
     if (!cfg->monitor_pattern) cfg->monitor_pattern = 'S';
     if (cfg->miss_rate_threshold < 0.0) cfg->miss_rate_threshold = 0.01; // Default: warn above 1%
     if (cfg->cpu_warn_threshold < 0.0) cfg->cpu_warn_threshold = 0.95;   // Default: warn above 95% of a core
+    if (cfg->pin_threads < 0) cfg->pin_threads = 0;
     // Default --connection-stage-timeout to 30 s; 0 means "operator disabled".
     if (cfg->connection_stage_timeout == UINT_MAX) cfg->connection_stage_timeout = 30;
 
@@ -1197,6 +1204,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_command_miss_tracking,
         o_miss_rate_threshold,
         o_cpu_warn_threshold,
+        o_pin_threads,
         o_tls,
         o_tls_cert,
         o_tls_key,
@@ -1319,6 +1327,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         {"command-miss-tracking", 1, 0, o_command_miss_tracking},
         {"miss-rate-threshold", 1, 0, o_miss_rate_threshold},
         {"cpu-warn-threshold", 1, 0, o_cpu_warn_threshold},
+        {"pin-threads", 0, 0, o_pin_threads},
         {"rate-limiting", 1, 0, o_rate_limiting},
         {"uri", 1, 0, o_uri},
         {"statsd-host", 1, 0, o_statsd_host},
@@ -2053,6 +2062,14 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
             cfg->miss_rate_threshold = pct / 100.0;
             break;
         }
+        case o_pin_threads:
+#ifdef __linux__
+            cfg->pin_threads = 1;
+            break;
+#else
+            fprintf(stderr, "error: --pin-threads is supported only on Linux.\n");
+            return -1;
+#endif
         case o_cpu_warn_threshold: {
             endptr = NULL;
             double pct = strtod(optarg, &endptr);
@@ -2663,6 +2680,8 @@ void usage()
         "met, memtier will do as many requests as possible per second.\n"
         "  -c, --clients=NUMBER           Number of clients per thread (default: 50)\n"
         "  -t, --threads=NUMBER           Number of threads (default: 4)\n"
+        "      --pin-threads              Pin workers round-robin to allowed CPUs before starting work (Linux).\n"
+        "                                 Disabled by default; use taskset or a container cpuset to select CPUs.\n"
         "      --test-time=SECS           Number of seconds to run the test\n"
         "      --clients-start=NUMBER     Starting number of clients per thread for staircase ramp-up.\n"
         "                                 Must be less than --clients. Requires --clients-step and --step-duration.\n"
@@ -2898,7 +2917,56 @@ struct cg_thread
         return m_cg->prepare();
     }
 
-    int start(void) { return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this); }
+    int start(void)
+    {
+        if (!m_config->pin_threads) return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
+#ifdef __linux__
+        // Query the creator's allowed mask, not the machine's online CPU count:
+        // taskset and container cpusets may expose sparse or restricted CPU IDs.
+        // Grow the mask for kernels configured with more than CPU_SETSIZE CPUs.
+        int capacity = CPU_SETSIZE;
+        cpu_set_t *mask;
+        size_t size;
+        while (true) {
+            size = CPU_ALLOC_SIZE(capacity);
+            mask = CPU_ALLOC(capacity);
+            if (!mask) return ENOMEM;
+            CPU_ZERO_S(size, mask);
+            if (sched_getaffinity(0, size, mask) == 0) break;
+            int error = errno;
+            CPU_FREE(mask);
+            if (error != EINVAL || capacity > INT_MAX / 2) return error;
+            capacity *= 2;
+        }
+        int count = CPU_COUNT_S(size, mask);
+        if (!count) {
+            CPU_FREE(mask);
+            return EINVAL;
+        }
+        unsigned int index = m_thread_id % (unsigned int) count;
+        int selected = -1;
+        for (int cpu = 0; cpu < capacity; cpu++) {
+            if (CPU_ISSET_S(cpu, size, mask) && index-- == 0) {
+                selected = cpu;
+                break;
+            }
+        }
+        assert(selected >= 0);
+        CPU_ZERO_S(size, mask);
+        CPU_SET_S(selected, size, mask);
+        pthread_attr_t attr;
+        int error = pthread_attr_init(&attr);
+        if (error == 0) {
+            error = pthread_attr_setaffinity_np(&attr, size, mask);
+            if (error == 0) error = pthread_create(&m_thread, &attr, cg_thread_start, (void *) this);
+            pthread_attr_destroy(&attr);
+        }
+        CPU_FREE(mask);
+        return error;
+#else
+        return ENOTSUP;
+#endif
+    }
 
     void join(void)
     {
@@ -2938,7 +3006,7 @@ struct cg_thread
         m_cpu_started = false;
 
         // Start new thread
-        return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
+        return start();
     }
 };
 
@@ -3520,7 +3588,11 @@ run_stats run_benchmark(int run_id, benchmark_config *cfg, object_generator *obj
     // launch threads
     fprintf(stderr, "[RUN #%u] Launching threads now...\n", run_id);
     for (std::vector<cg_thread *>::iterator i = threads.begin(); i != threads.end(); i++) {
-        (*i)->start();
+        int error = (*i)->start();
+        if (error != 0) {
+            benchmark_error_log("error: failed to start thread %u: %s\n", (*i)->m_thread_id, strerror(error));
+            exit(1);
+        }
     }
 
     // Send "run started" annotation to Graphite
@@ -3654,6 +3726,7 @@ run_stats run_benchmark(int run_id, benchmark_config *cfg, object_generator *obj
                     benchmark_error_log("Thread %u restarted successfully.\n", (*i)->m_thread_id);
                 } else {
                     benchmark_error_log("Failed to restart thread %u.\n", (*i)->m_thread_id);
+                    exit(1);
                 }
             }
 
@@ -4323,6 +4396,7 @@ int main(int argc, char *argv[])
     cfg.max_retries = -1;
     cfg.miss_rate_threshold = -1.0;   // sentinel; config_init_defaults replaces with 0.01
     cfg.cpu_warn_threshold = -1.0;    // sentinel; config_init_defaults replaces with 0.95
+    cfg.pin_threads = -1;             // sentinel; config_init_defaults disables worker pinning
     cfg.command_miss_tracking = true; // Default: auto-track misses for known shapes
     // Sentinel for --connection-stage-timeout: UINT_MAX means "operator did
     // not specify"; config_init_defaults replaces with 30 s. We can't reuse 0

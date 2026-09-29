@@ -1,0 +1,126 @@
+"""Validate actual worker affinity and result output on a restricted Linux mask."""
+import collections
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from include import (add_required_env_arguments, addTLSArgs, ensure_clean_benchmark_folder,
+                     get_default_memtier_config)
+from mb import Benchmark, RunConfig
+
+
+def _affinity_run(env, pinned, single_cpu=False, run_count=1):
+    if sys.platform != 'linux' or not shutil.which('taskset'):
+        env.skip()
+    available = sorted(os.sched_getaffinity(0))
+    if len(available) < 2 and not single_cpu:
+        env.skip()
+    # Deliberately exercise non-contiguous IDs where the host permits them.
+    cpus = [available[0]] if single_cpu else [available[0], available[-1]]
+    specs = {'name': env.testName, 'args': ['--hide-histogram', '--run-count', str(run_count)]}
+    if pinned:
+        specs['args'].append('--pin-threads')
+    addTLSArgs(specs, env)
+    config = get_default_memtier_config(threads=4, clients=1, requests=None, test_time=2)
+    add_required_env_arguments(specs, config, env, env.getMasterNodesList())
+    with tempfile.TemporaryDirectory() as directory:
+        config = RunConfig(directory, env.testName, config, {})
+        ensure_clean_benchmark_folder(config.results_dir)
+        benchmark = Benchmark.from_json(config, specs)
+        args = ['taskset', '-c', ','.join(map(str, cpus))] + benchmark.args
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(args, stdout=stdout, stderr=stderr)
+            observed = set()
+            try:
+                deadline = time.monotonic() + 20
+                while process.poll() is None:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("memtier did not finish within 20 seconds")
+                    tasks = Path('/proc/{}/task'.format(process.pid))
+                    try:
+                        tids = sorted(int(x.name) for x in tasks.iterdir() if int(x.name) != process.pid)
+                        masks = [tuple(sorted(os.sched_getaffinity(tid))) for tid in tids]
+                        main_mask = sorted(os.sched_getaffinity(process.pid))
+                    except (FileNotFoundError, ProcessLookupError):
+                        continue
+                    if len(tids) == 4:
+                        env.assertEqual(main_mask, cpus)
+                        expected = [(cpus[i % len(cpus)],) for i in range(4)] if pinned else [tuple(cpus)] * 4
+                        env.assertEqual(collections.Counter(masks), collections.Counter(expected))
+                        observed.add(tuple(tids))
+                    time.sleep(.01)
+                stderr.seek(0)
+                env.assertEqual(process.returncode, 0, message=stderr.read().decode(errors='replace'))
+                env.assertGreaterEqual(len(observed), run_count)
+                with open(os.path.join(config.results_dir, 'mb.json')) as f:
+                    data = json.load(f)
+                env.assertEqual(data['configuration']['pin_threads'], pinned)
+                if run_count == 1:
+                    env.assertGreater(data['ALL STATS']['Totals']['Count'], 0)
+                    env.assertEqual(data['ALL STATS']['Totals']['Connection Errors'], 0)
+                else:
+                    env.assertTrue(any('AGGREGATED' in key for key in data))
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+
+
+def test_default_preserves_inherited_mask(env):
+    _affinity_run(env, False)
+
+
+def test_pin_workers_to_sparse_allowed_cpus(env):
+    _affinity_run(env, True)
+
+
+def test_pin_workers_with_one_allowed_cpu(env):
+    _affinity_run(env, True, single_cpu=True)
+
+
+def test_pin_workers_across_multiple_runs(env):
+    _affinity_run(env, True, run_count=2)
+
+
+def test_affinity_failure_exits_without_hanging(env):
+    """A denied affinity request must fail visibly, not wait on an unstarted worker."""
+    compiler = shutil.which('cc')
+    if sys.platform != 'linux' or not compiler:
+        env.skip()
+    specs = {'name': env.testName, 'args': ['--pin-threads', '--hide-histogram']}
+    addTLSArgs(specs, env)
+    config = get_default_memtier_config(threads=4, clients=1, requests=100)
+    add_required_env_arguments(specs, config, env, env.getMasterNodesList())
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / 'deny_affinity.c'
+        library = Path(directory) / 'deny_affinity.so'
+        source.write_text('''#define _GNU_SOURCE
+#include <pthread.h>
+#include <sched.h>
+#include <errno.h>
+int pthread_attr_setaffinity_np(pthread_attr_t *attr, size_t size, const cpu_set_t *mask) {
+    return EINVAL;
+}
+''')
+        subprocess.run([compiler, '-shared', '-fPIC', str(source), '-o', str(library)],
+                       check=True, timeout=30, capture_output=True)
+        config = RunConfig(directory, env.testName, config, {})
+        ensure_clean_benchmark_folder(config.results_dir)
+        benchmark = Benchmark.from_json(config, specs)
+        child_env = dict(os.environ, LD_PRELOAD=str(library))
+        result = subprocess.run(benchmark.args, env=child_env, capture_output=True, timeout=10)
+        env.assertEqual(result.returncode, 1)
+        env.assertIn('failed to start thread', result.stderr.decode(errors='replace'))
+        # A failed startup must not publish a successful run's statistics.
+        output = Path(config.results_dir) / 'mb.json'
+        if output.exists():
+            try:
+                data = json.loads(output.read_text())
+            except json.JSONDecodeError:
+                data = {}
+            env.assertNotIn('ALL STATS', data)
