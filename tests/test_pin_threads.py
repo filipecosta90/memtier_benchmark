@@ -48,9 +48,30 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                         main_mask = sorted(os.sched_getaffinity(process.pid))
                     except (FileNotFoundError, ProcessLookupError):
                         continue
-                    if len(tids) == 4:
+                    if len(tids) >= 4:
                         env.assertEqual(main_mask, cpus)
                         expected = [(cpus[i % len(cpus)],) for i in range(4)] if pinned else [tuple(cpus)] * 4
+                        current = dict(zip(tids, masks))
+                        # Sanitizers can add a helper thread with the inherited
+                        # mask. On a multi-CPU mask, identify the four pinned
+                        # workers by their singleton masks. Keep checking any
+                        # previously observed group even if a worker loses its
+                        # affinity, so selection cannot hide a regression.
+                        if pinned and len(cpus) > 1:
+                            wanted = collections.Counter(expected)
+                            for group in observed:
+                                if all(tid in current for tid in group):
+                                    env.assertEqual(collections.Counter(current[tid] for tid in group), wanted)
+                            tids = [tid for tid in tids if len(current[tid]) == 1]
+                            masks = [current[tid] for tid in tids]
+                            if len(tids) != 4:
+                                time.sleep(.01)
+                                continue
+                        else:
+                            # Default placement and a one-CPU restriction apply
+                            # to every thread, including runtime helpers.
+                            env.assertTrue(all(mask == tuple(cpus) for mask in masks))
+                            expected = [tuple(cpus)] * len(tids)
                         # Without pthread affinity attributes, a newly created
                         # worker may be observed before its entry function pins
                         # it. Require every run to reach the expected masks,
