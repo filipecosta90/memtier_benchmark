@@ -2847,6 +2847,50 @@ void usage()
 
 static void *cg_thread_start(void *t);
 
+#ifdef __linux__
+static int get_allowed_cpu_mask(cpu_set_t *&mask, size_t &size, int &capacity)
+{
+    // Query the caller's allowed mask, not the machine's online CPU count:
+    // taskset and container cpusets may expose sparse or restricted CPU IDs.
+    // Grow the mask for kernels configured with more than CPU_SETSIZE CPUs.
+    capacity = CPU_SETSIZE;
+    while (true) {
+        size = CPU_ALLOC_SIZE(capacity);
+        mask = CPU_ALLOC(capacity);
+        if (!mask) return ENOMEM;
+        CPU_ZERO_S(size, mask);
+        if (sched_getaffinity(0, size, mask) == 0) {
+            if (CPU_COUNT_S(size, mask) > 0) return 0;
+            CPU_FREE(mask);
+            return EINVAL;
+        }
+        int error = errno;
+        CPU_FREE(mask);
+        if (error != EINVAL || capacity > INT_MAX / 2) return error;
+        capacity *= 2;
+    }
+}
+
+static void warn_cpu_oversubscription(unsigned int workers)
+{
+    cpu_set_t *mask;
+    size_t size;
+    int capacity;
+    // This advisory must not prevent an otherwise valid unpinned run if the
+    // mask cannot be read. Explicit pinning still reports affinity failures.
+    if (get_allowed_cpu_mask(mask, size, capacity) != 0) return;
+    int count = CPU_COUNT_S(size, mask);
+    CPU_FREE(mask);
+    if (workers > (unsigned int) count) {
+        fprintf(stderr,
+                "warning: CPU oversubscription: %u worker threads share %d allowed logical CPU(s). "
+                "CPU contention may limit benchmark throughput and increase latency. "
+                "Consider reducing --threads or expanding the allowed CPU set.\n",
+                workers, count);
+    }
+}
+#endif
+
 struct cg_thread
 {
     unsigned int m_thread_id;
@@ -2922,28 +2966,12 @@ struct cg_thread
 #ifdef __linux__
     int set_affinity(pthread_attr_t *attr)
     {
-        // Query the caller's allowed mask, not the machine's online CPU count:
-        // taskset and container cpusets may expose sparse or restricted CPU IDs.
-        // Grow the mask for kernels configured with more than CPU_SETSIZE CPUs.
-        int capacity = CPU_SETSIZE;
         cpu_set_t *mask;
         size_t size;
-        while (true) {
-            size = CPU_ALLOC_SIZE(capacity);
-            mask = CPU_ALLOC(capacity);
-            if (!mask) return ENOMEM;
-            CPU_ZERO_S(size, mask);
-            if (sched_getaffinity(0, size, mask) == 0) break;
-            int error = errno;
-            CPU_FREE(mask);
-            if (error != EINVAL || capacity > INT_MAX / 2) return error;
-            capacity *= 2;
-        }
+        int capacity;
+        int error = get_allowed_cpu_mask(mask, size, capacity);
+        if (error != 0) return error;
         int count = CPU_COUNT_S(size, mask);
-        if (!count) {
-            CPU_FREE(mask);
-            return EINVAL;
-        }
         unsigned int index = m_thread_id % (unsigned int) count;
         int selected = -1;
         for (int cpu = 0; cpu < capacity; cpu++) {
@@ -2955,7 +2983,6 @@ struct cg_thread
         assert(selected >= 0);
         CPU_ZERO_S(size, mask);
         CPU_SET_S(selected, size, mask);
-        int error;
 #ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
         if (attr) {
             error = pthread_attr_setaffinity_np(attr, size, mask);
@@ -5199,6 +5226,11 @@ int main(int argc, char *argv[])
     }
 
     if (!cfg.verify_only) {
+#ifdef __linux__
+        // Once per invocation, including when pinning is disabled or multiple
+        // benchmark runs are requested. Count logical CPUs, not physical cores.
+        warn_cpu_oversubscription(cfg.threads);
+#endif
         std::vector<run_stats> all_stats;
         all_stats.reserve(cfg.run_count);
 

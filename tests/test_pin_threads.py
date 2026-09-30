@@ -13,7 +13,7 @@ from include import (add_required_env_arguments, addTLSArgs, ensure_clean_benchm
 from mb import Benchmark, RunConfig
 
 
-def _affinity_run(env, pinned, single_cpu=False, run_count=1):
+def _affinity_run(env, pinned, single_cpu=False, run_count=1, workers=4):
     if sys.platform != 'linux' or not shutil.which('taskset'):
         env.skip()
     available = sorted(os.sched_getaffinity(0))
@@ -25,7 +25,7 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
     if pinned:
         specs['args'].append('--pin-threads')
     addTLSArgs(specs, env)
-    config = get_default_memtier_config(threads=4, clients=1, requests=None, test_time=2)
+    config = get_default_memtier_config(threads=workers, clients=1, requests=None, test_time=2)
     add_required_env_arguments(specs, config, env, env.getMasterNodesList())
     with tempfile.TemporaryDirectory() as directory:
         config = RunConfig(directory, env.testName, config, {})
@@ -47,12 +47,12 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                         main_mask = sorted(os.sched_getaffinity(process.pid))
                     except (FileNotFoundError, ProcessLookupError):
                         continue
-                    if len(tids) >= 4:
+                    if len(tids) >= workers:
                         env.assertEqual(main_mask, cpus)
-                        expected = [(cpus[i % len(cpus)],) for i in range(4)] if pinned else [tuple(cpus)] * 4
+                        expected = [(cpus[i % len(cpus)],) for i in range(workers)] if pinned else [tuple(cpus)] * workers
                         current = dict(zip(tids, masks))
                         # Sanitizers can add a helper thread with the inherited
-                        # mask. On a multi-CPU mask, identify the four pinned
+                        # mask. On a multi-CPU mask, identify the pinned
                         # workers by their singleton masks. Keep checking any
                         # previously observed group even if a worker loses its
                         # affinity, so selection cannot hide a regression.
@@ -62,7 +62,7 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                                     env.assertEqual([current[tid] for tid in group], expected)
                             tids = [tid for tid in tids if len(current[tid]) == 1]
                             masks = [current[tid] for tid in tids]
-                            if len(tids) != 4:
+                            if len(tids) != workers:
                                 time.sleep(.01)
                                 continue
                         else:
@@ -82,7 +82,15 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                             observed.add(tuple(tids))
                     time.sleep(.01)
                 stderr.seek(0)
-                env.assertEqual(process.returncode, 0, message=stderr.read().decode(errors='replace'))
+                diagnostics = stderr.read().decode(errors='replace')
+                env.assertEqual(process.returncode, 0, message=diagnostics)
+                warning = 'warning: CPU oversubscription:'
+                env.assertEqual(diagnostics.count(warning), 1 if workers > len(cpus) else 0)
+                if workers > len(cpus):
+                    env.assertIn('{} worker threads share {} allowed logical CPU(s)'.format(workers, len(cpus)),
+                                 diagnostics)
+                    env.assertIn('CPU contention may limit benchmark throughput and increase latency', diagnostics)
+                    env.assertIn('Consider reducing --threads or expanding the allowed CPU set', diagnostics)
                 env.assertGreaterEqual(len(observed), run_count)
                 with open(os.path.join(config.results_dir, 'mb.json')) as f:
                     data = json.load(f)
@@ -114,6 +122,22 @@ def test_pin_workers_with_one_allowed_cpu(env):
 
 def test_pin_workers_across_multiple_runs(env):
     _affinity_run(env, True, run_count=2)
+
+
+def test_default_equal_workers_and_cpus_does_not_warn(env):
+    _affinity_run(env, False, workers=2)
+
+
+def test_pinned_equal_workers_and_cpus_does_not_warn(env):
+    _affinity_run(env, True, workers=2)
+
+
+def test_default_fewer_workers_than_cpus_does_not_warn(env):
+    _affinity_run(env, False, workers=1)
+
+
+def test_pinned_fewer_workers_than_cpus_does_not_warn(env):
+    _affinity_run(env, True, workers=1)
 
 
 def test_affinity_failure_exits_without_hanging(env):
