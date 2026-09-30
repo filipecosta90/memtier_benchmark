@@ -51,8 +51,15 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                     if len(tids) == 4:
                         env.assertEqual(main_mask, cpus)
                         expected = [(cpus[i % len(cpus)],) for i in range(4)] if pinned else [tuple(cpus)] * 4
-                        env.assertEqual(collections.Counter(masks), collections.Counter(expected))
-                        observed.add(tuple(tids))
+                        # Without pthread affinity attributes, a newly created
+                        # worker may be observed before its entry function pins
+                        # it. Require every run to reach the expected masks,
+                        # then enforce them for the rest of that worker group.
+                        actual = collections.Counter(masks)
+                        wanted = collections.Counter(expected)
+                        if tuple(tids) in observed or actual == wanted:
+                            env.assertEqual(actual, wanted)
+                            observed.add(tuple(tids))
                     time.sleep(.01)
                 stderr.seek(0)
                 env.assertEqual(process.returncode, 0, message=stderr.read().decode(errors='replace'))
@@ -104,6 +111,9 @@ def test_affinity_failure_exits_without_hanging(env):
 #include <sched.h>
 #include <errno.h>
 int pthread_attr_setaffinity_np(pthread_attr_t *attr, size_t size, const cpu_set_t *mask) {
+    return EINVAL;
+}
+int pthread_setaffinity_np(pthread_t thread, size_t size, const cpu_set_t *mask) {
     return EINVAL;
 }
 ''')

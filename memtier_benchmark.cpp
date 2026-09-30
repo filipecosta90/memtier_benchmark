@@ -2917,11 +2917,10 @@ struct cg_thread
         return m_cg->prepare();
     }
 
-    int start(void)
-    {
-        if (!m_config->pin_threads) return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
 #ifdef __linux__
-        // Query the creator's allowed mask, not the machine's online CPU count:
+    int set_affinity(pthread_attr_t *attr)
+    {
+        // Query the caller's allowed mask, not the machine's online CPU count:
         // taskset and container cpusets may expose sparse or restricted CPU IDs.
         // Grow the mask for kernels configured with more than CPU_SETSIZE CPUs.
         int capacity = CPU_SETSIZE;
@@ -2954,15 +2953,38 @@ struct cg_thread
         assert(selected >= 0);
         CPU_ZERO_S(size, mask);
         CPU_SET_S(selected, size, mask);
-        pthread_attr_t attr;
-        int error = pthread_attr_init(&attr);
-        if (error == 0) {
-            error = pthread_attr_setaffinity_np(&attr, size, mask);
-            if (error == 0) error = pthread_create(&m_thread, &attr, cg_thread_start, (void *) this);
-            pthread_attr_destroy(&attr);
+        int error;
+#ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
+        if (attr) {
+            error = pthread_attr_setaffinity_np(attr, size, mask);
+        } else
+#else
+        (void) attr;
+#endif
+        {
+            error = pthread_setaffinity_np(pthread_self(), size, mask);
         }
         CPU_FREE(mask);
         return error;
+    }
+#endif
+
+    int start(void)
+    {
+        if (!m_config->pin_threads) return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
+#if defined(__linux__) && defined(HAVE_PTHREAD_ATTR_SETAFFINITY_NP)
+        pthread_attr_t attr;
+        int error = pthread_attr_init(&attr);
+        if (error == 0) {
+            error = set_affinity(&attr);
+            if (error == 0) error = pthread_create(&m_thread, &attr, cg_thread_start, (void *) this);
+            pthread_attr_destroy(&attr);
+        }
+        return error;
+#elif defined(__linux__)
+        // Some Linux libcs lack affinity attributes. The worker pins itself
+        // on entry, before CPU accounting and any benchmark work.
+        return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
 #else
         return ENOTSUP;
 #endif
@@ -3139,6 +3161,16 @@ struct cpu_live_sampler
 static void *cg_thread_start(void *t)
 {
     cg_thread *thread = (cg_thread *) t;
+
+#if defined(__linux__) && !defined(HAVE_PTHREAD_ATTR_SETAFFINITY_NP)
+    if (thread->m_config->pin_threads) {
+        int error = thread->set_affinity(NULL);
+        if (error != 0) {
+            benchmark_error_log("error: failed to start thread %u: %s\n", thread->m_thread_id, strerror(error));
+            exit(1);
+        }
+    }
+#endif
 
     // Each worker installs its own sigaltstack so a SIGSEGV caused by stack
     // overflow on this thread (or any other handler entry) runs on a fresh
@@ -3722,11 +3754,14 @@ run_stats run_benchmark(int run_id, benchmark_config *cfg, object_generator *obj
                 if (prom_enabled(cfg)) prom_fold_thread(cfg, (size_t) (i - threads.begin()), (*i)->m_cg);
 
                 // Attempt to restart
-                if ((*i)->restart() == 0) {
+                int restart_error = (*i)->restart();
+                if (restart_error == 0) {
                     benchmark_error_log("Thread %u restarted successfully.\n", (*i)->m_thread_id);
                 } else {
                     benchmark_error_log("Failed to restart thread %u.\n", (*i)->m_thread_id);
-                    exit(1);
+                    // Preserve the existing -1 client-preparation failure path.
+                    // Positive errors mean no pthread was created to monitor.
+                    if (restart_error > 0) exit(1);
                 }
             }
 
