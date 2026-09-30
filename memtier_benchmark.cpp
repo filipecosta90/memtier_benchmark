@@ -983,7 +983,7 @@ static void config_init_defaults(struct benchmark_config *cfg)
     if (!cfg->monitor_pattern) cfg->monitor_pattern = 'S';
     if (cfg->miss_rate_threshold < 0.0) cfg->miss_rate_threshold = 0.01; // Default: warn above 1%
     if (cfg->cpu_warn_threshold < 0.0) cfg->cpu_warn_threshold = 0.95;   // Default: warn above 95% of a core
-    if (cfg->pin_threads < 0) cfg->pin_threads = 0;
+    // pin_threads defaults to false via benchmark_config value initialization.
     // Default --connection-stage-timeout to 30 s; 0 means "operator disabled".
     if (cfg->connection_stage_timeout == UINT_MAX) cfg->connection_stage_timeout = 30;
 
@@ -2064,7 +2064,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         }
         case o_pin_threads:
 #ifdef __linux__
-            cfg->pin_threads = 1;
+            cfg->pin_threads = true;
             break;
 #else
             fprintf(stderr, "error: --pin-threads is supported only on Linux.\n");
@@ -4438,7 +4438,6 @@ int main(int argc, char *argv[])
     cfg.max_retries = -1;
     cfg.miss_rate_threshold = -1.0;   // sentinel; config_init_defaults replaces with 0.01
     cfg.cpu_warn_threshold = -1.0;    // sentinel; config_init_defaults replaces with 0.95
-    cfg.pin_threads = -1;             // sentinel; config_init_defaults disables worker pinning
     cfg.command_miss_tracking = true; // Default: auto-track misses for known shapes
     // Sentinel for --connection-stage-timeout: UINT_MAX means "operator did
     // not specify"; config_init_defaults replaces with 30 s. We can't reuse 0

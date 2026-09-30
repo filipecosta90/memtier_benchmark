@@ -1,5 +1,4 @@
 """Validate actual worker affinity and result output on a restricted Linux mask."""
-import collections
 import json
 import os
 import shutil
@@ -58,10 +57,9 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                         # previously observed group even if a worker loses its
                         # affinity, so selection cannot hide a regression.
                         if pinned and len(cpus) > 1:
-                            wanted = collections.Counter(expected)
                             for group in observed:
                                 if all(tid in current for tid in group):
-                                    env.assertEqual(collections.Counter(current[tid] for tid in group), wanted)
+                                    env.assertEqual([current[tid] for tid in group], expected)
                             tids = [tid for tid in tids if len(current[tid]) == 1]
                             masks = [current[tid] for tid in tids]
                             if len(tids) != 4:
@@ -76,10 +74,11 @@ def _affinity_run(env, pinned, single_cpu=False, run_count=1):
                         # worker may be observed before its entry function pins
                         # it. Require every run to reach the expected masks,
                         # then enforce them for the rest of that worker group.
-                        actual = collections.Counter(masks)
-                        wanted = collections.Counter(expected)
-                        if tuple(tids) in observed or actual == wanted:
-                            env.assertEqual(actual, wanted)
+                        # Workers are created sequentially, so TID order tracks
+                        # worker index. Check round-robin assignment, not just
+                        # the number of workers on each CPU (AABB is not ABAB).
+                        if tuple(tids) in observed or masks == expected:
+                            env.assertEqual(masks, expected)
                             observed.add(tuple(tids))
                     time.sleep(.01)
                 stderr.seek(0)
@@ -108,6 +107,8 @@ def test_pin_workers_to_sparse_allowed_cpus(env):
 
 
 def test_pin_workers_with_one_allowed_cpu(env):
+    # Every thread inherits this mask even without pinning. This exercises
+    # oversubscribed startup/completion; the sparse-mask test checks placement.
     _affinity_run(env, True, single_cpu=True)
 
 
