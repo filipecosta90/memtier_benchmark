@@ -2856,6 +2856,7 @@ struct cg_thread
     abstract_protocol *m_protocol;
     pthread_t m_thread;
     std::atomic<bool> m_finished; // Atomic to prevent data race between worker thread write and main thread read
+    std::atomic<int> m_affinity_result;
     bool m_restart_requested;
     unsigned int m_restart_count;
 
@@ -2881,6 +2882,7 @@ struct cg_thread
             m_cg(NULL),
             m_protocol(NULL),
             m_finished(false),
+            m_affinity_result(0),
             m_restart_requested(false),
             m_restart_count(0),
             m_cpu_user_usec_acc(0),
@@ -2983,8 +2985,15 @@ struct cg_thread
         return error;
 #elif defined(__linux__)
         // Some Linux libcs lack affinity attributes. The worker pins itself
-        // on entry, before CPU accounting and any benchmark work.
-        return pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
+        // on entry, before CPU accounting and any benchmark work. Wait for
+        // its result so startup errors follow the main thread's normal path.
+        m_affinity_result.store(-1, std::memory_order_relaxed);
+        int error = pthread_create(&m_thread, NULL, cg_thread_start, (void *) this);
+        if (error != 0) return error;
+        while ((error = m_affinity_result.load(std::memory_order_acquire)) == -1)
+            sched_yield();
+        if (error != 0) join();
+        return error;
 #else
         return ENOTSUP;
 #endif
@@ -3165,10 +3174,8 @@ static void *cg_thread_start(void *t)
 #if defined(__linux__) && !defined(HAVE_PTHREAD_ATTR_SETAFFINITY_NP)
     if (thread->m_config->pin_threads) {
         int error = thread->set_affinity(NULL);
-        if (error != 0) {
-            benchmark_error_log("error: failed to start thread %u: %s\n", thread->m_thread_id, strerror(error));
-            exit(1);
-        }
+        thread->m_affinity_result.store(error, std::memory_order_release);
+        if (error != 0) return NULL;
     }
 #endif
 
